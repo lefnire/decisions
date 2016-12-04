@@ -45,7 +45,8 @@ let Feature = sequelize.define('features', {
 // Candidate
 let Candidate = sequelize.define('candidates', {
   name: Sequelize.STRING,
-  description: Sequelize.TEXT,
+  notes: Sequelize.TEXT,
+  links: Sequelize.ARRAY(Sequelize.STRING)
 });
 
 // Score

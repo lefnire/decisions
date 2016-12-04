@@ -165,9 +165,12 @@ class CandidateModal extends Component {
   };
   changeText = (key, e) => this.setState(update(this.state, {form: {[key]: {$set: e.target.value}}}));
   show = id => {
-    this.setState({show: true, editing: !!id, form: {}});
+    this.setState({show: true, editing: !!id, form: {links: []}});
     if (!!id) {
-      _fetch('/candidates/' + id).then(form => this.setState({form}));
+      _fetch('/candidates/' + id).then(form => {
+        form.links = form.links || [];
+        this.setState({form})
+      });
     }
   };
   close = () => this.setState({show: false});
@@ -187,7 +190,7 @@ class CandidateModal extends Component {
     return (
       <Modal show={show} onHide={this.close}>
         <Modal.Header closeButton>
-          <Modal.Title>{form.id? form.name : 'Add Candidate'}</Modal.Title>
+          <Modal.Title>{editing? form.name : 'Add Candidate'}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <form noValidate onSubmit={this.submit}>
@@ -200,10 +203,24 @@ class CandidateModal extends Component {
             <FieldGroup
               id="candidateDescription"
               componentClass="textarea"
-              placeholder="Description"
+              placeholder="Notes"
               value={form.description}
               onChange={this.changeText.bind(this, 'description')}
             />
+            <Panel header="Links">
+              <ul>
+                {form.links && form.links.map((link, i) => (
+                  <FieldGroup
+                    key={'candidateLink' + i}
+                    id={"candidateLink" + i}
+                    placeholder="Link"
+                    value={link}
+                    onChange={e => this.setState(update(this.state, {form: {links: {[i]: {$set: e.target.value}}}}))}
+                  />
+                ))}
+              </ul>
+              <Button bsSize="xsmall" onClick={() => this.setState(update(this.state, {form: {links: {$push: ['']}}}))}>Add Link</Button>
+            </Panel>
             <Button type="submit">Submit</Button>
           </form>
         </Modal.Body>
@@ -339,7 +356,7 @@ class App extends Component {
             <tbody>
               {candidates.map(c => (
                 <tr key={c.id}>
-                  <td>{c.name}</td>
+                  <td>{c.links && c.links[0]? <a href={c.links[0]} target="_blank">{c.name}</a> : c.name}</td>
                   <td>{c.score}</td>
                   <td>
                     <ButtonToolbar>
