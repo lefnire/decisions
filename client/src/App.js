@@ -1,6 +1,5 @@
 //FIXME populate w/ scores on scoreCandidate
 //FIXME show averages
-//FIXME user.role and only admin can manage features
 
 import React, { Component } from 'react';
 import {Table, Col, Button, Modal, FormGroup, ControlLabel, HelpBlock, FormControl, Panel, Alert, ButtonToolbar} from 'react-bootstrap';
@@ -8,7 +7,9 @@ import update from 'react-addons-update';
 import _ from 'lodash';
 
 const SERVER = 'http://localhost:3001';
-let jwt = localStorage.getItem('jwt');
+let user = localStorage.getItem('user');
+user = user && JSON.parse(user);
+console.log(user);
 
 class Auth extends Component {
   state = {
@@ -21,7 +22,7 @@ class Auth extends Component {
     e.preventDefault();
     _fetch('/login', {method: 'POST', body: this.state.form}).then(json => {
       if (json.message) return this.setState({error: json.message});
-      this.props.onAuth(json.token);
+      this.props.onAuth(json);
     });
     return false;
   };
@@ -32,7 +33,7 @@ class Auth extends Component {
       return this.setState({error: "Passwords don't match"});
     _fetch('/register', {method: 'POST', body: form}).then(json => {
       if (json.message) return this.setState({error: json.message});
-      this.props.onAuth(json.token);
+      this.props.onAuth(json);
     });
     return false;
   };
@@ -297,7 +298,6 @@ class FeatureModal extends Component {
 
 class App extends Component {
   state = {
-    jwt: null,
     candidates: [],
     features: [],
     login: {}
@@ -308,18 +308,18 @@ class App extends Component {
       _fetch('/candidates'),
       _fetch('/features')
     ]).then(arr => {
-      console.log(arr);
-      this.setState({jwt, candidates: arr[0], features: arr[1]});
+      // console.log(arr);
+      this.setState({candidates: arr[0], features: arr[1]});
     });
   };
 
   componentDidMount() {
-    if (jwt) this.onAuth(jwt);
+    if (user) this.fetchStuff();
   }
 
-  onAuth = _jwt => {
-    jwt = _jwt;
-    localStorage.setItem('jwt', jwt);
+  onAuth = _user => {
+    user = _user;
+    localStorage.setItem('user', JSON.stringify(user));
     this.fetchStuff();
   };
 
@@ -338,8 +338,9 @@ class App extends Component {
   };
 
   render() {
-    let {jwt, candidates, features} = this.state;
-    if (!jwt) return <Auth onAuth={this.onAuth} />;
+    if (!user) return <Auth onAuth={this.onAuth} />;
+    let {candidates, features} = this.state;
+    let isAdmin = user.role === 'admin';
     return (
       <div className="container">
         <CandidateModal ref="candidateModal" refresh={this.fetchStuff} />
@@ -361,8 +362,8 @@ class App extends Component {
                   <td>
                     <ButtonToolbar>
                       <Button bsStyle="primary" bsSize="xsmall" onClick={this.showScoreCandidate.bind(this, c.id)}>Score</Button>
-                      <Button bsSize="xsmall" onClick={this.showCandidate.bind(this, c.id)}>Edit</Button>
-                      <Button bsStyle="danger" bsSize="xsmall" onClick={this.deleteCandidate.bind(this, c.id)}>Delete</Button>
+                      {isAdmin && <Button bsSize="xsmall" onClick={this.showCandidate.bind(this, c.id)}>Edit</Button>}
+                      {isAdmin && <Button bsStyle="danger" bsSize="xsmall" onClick={this.deleteCandidate.bind(this, c.id)}>Delete</Button>}
                     </ButtonToolbar>
                   </td>
                 </tr>
@@ -385,10 +386,10 @@ class App extends Component {
                   <td>{f.title}</td>
                   <td>{f.weight}</td>
                   <td>
-                    <ButtonToolbar>
+                    {isAdmin && <ButtonToolbar>
                       <Button bsSize="xsmall" onClick={this.showFeature.bind(this, f.id)}>Edit</Button>
                       <Button bsStyle="danger" bsSize="xsmall" onClick={this.deleteFeature.bind(this, f.id)}>Delete</Button>
-                    </ButtonToolbar>
+                    </ButtonToolbar>}
                   </td>
                 </tr>
               ))}
@@ -404,9 +405,8 @@ class App extends Component {
 function _fetch (url, data={}) {
   _.defaults(data, {method: 'GET', headers: {}});
   _.defaults(data.headers, {'Content-Type': 'application/json'});
-  if (jwt) data.headers['x-access-token'] = jwt;
+  if (user) data.headers['x-access-token'] = user.token;
   if (data.body) data.body = JSON.stringify(data.body);
-  console.log(data);
   return fetch(SERVER + url, data).then(res => res.json()); //.catch(e => console.log("Error: ", e));
 }
 

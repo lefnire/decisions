@@ -26,6 +26,7 @@ let defaultUserSchema = passportLocalSequelize.defaultUserSchema;
 delete defaultUserSchema.username;
 let User = sequelize.define('users', _.defaults({
   email: {type: Sequelize.STRING, validate: {isEmail:true}, unique: true, allowNull: false},
+  role: {type: Sequelize.ENUM('user', 'admin'), defaultValue: 'user'}
 }, defaultUserSchema), {
   classMethods: {}
 });
@@ -51,7 +52,6 @@ let Candidate = sequelize.define('candidates', {
 
 // Score
 let Score = sequelize.define('scores', {
-  // FIXME use proper sequelize for these foreign keys. Won't cascade effects
   user_id: {type: Sequelize.INTEGER, primaryKey: true, onDelete: 'CASCADE'},
   candidate_id: {type: Sequelize.INTEGER, primaryKey: true, onDelete: 'CASCADE'},
   feature_id: {type: Sequelize.INTEGER, primaryKey: true, onDelete: 'CASCADE'},
@@ -86,13 +86,17 @@ app.post('/register', (req, res, next) => {
   User.register(req.body, req.body.password, (err, user) => {
     if (err) return next(err);
     passport.authenticate('local', localOpts)(req, res, () => {
-      res.json({token: sign(user)});
+      res.json({token: sign(user), uid: user.id, role: user.role});
     });
   });
 });
 
 app.post('/login', passport.authenticate('local', localOpts), function(req, res){
-  res.json({token: sign(req.user)});
+  res.json({
+    token: sign(req.user),
+    uid: req.user.id,
+    role: req.user.role
+  });
 });
 
 
@@ -103,13 +107,13 @@ app.get('/features', ensureAuth, (req, res, next) => {
 app.get('/features/:id', ensureAuth, (req, res, next) => {
   Feature.findById(req.params.id).then(f => res.json(f));
 });
-app.post('/features', ensureAuth, (req, res, next) => {
+app.post('/features', ensureAuth, ensureAdmin, (req, res, next) => {
   Feature.create(req.body).then(f => res.json(f));
 });
-app.put('/features/:id', ensureAuth, (req, res, next) => {
+app.put('/features/:id', ensureAuth, ensureAdmin, (req, res, next) => {
   Feature.update(req.body, {where: {id: req.params.id}, returning: true}).then(f => res.json(f[1][0]));
 });
-app.delete('/features/:id', ensureAuth, (req, res, next) => {
+app.delete('/features/:id', ensureAuth, ensureAdmin, (req, res, next) => {
   Feature.destroy({where: {id: req.params.id}}).then(() => res.json({ok: true}));
 });
 
@@ -135,16 +139,17 @@ app.get('/candidates', ensureAuth, (req, res, next) => {
     res.json(_.sortBy(candidates, 'score').reverse());
   });
 });
+// TODO make sure ensureAuth v ensureAdmin is used properly in the following candidate-routes
 app.get('/candidates/:id', ensureAuth, (req, res, next) => {
   Candidate.findById(req.params.id).then(c => res.json(c));
 });
 app.post('/candidates', ensureAuth, (req, res, next) => {
   Candidate.create(req.body).then(f => res.json(f));
 });
-app.put('/candidates/:id', ensureAuth, (req, res, next) => {
+app.put('/candidates/:id', ensureAuth, ensureAdmin, (req, res, next) => {
   Candidate.update(req.body, {where: {id: req.params.id}, returning: true}).then(c => res.json(c[1][0]));
 });
-app.delete('/candidates/:id', ensureAuth, (req, res, next) => {
+app.delete('/candidates/:id', ensureAuth, ensureAdmin, (req, res, next) => {
   Candidate.destroy({where: {id: req.params.id}}).then(() => res.json({ok: true}));
 });
 
@@ -179,7 +184,7 @@ function ensureAuth (req, res, next) {
   jwt.verify(token, nconf.get('SECRET'), (err, decoded) => {
     if (err)
       return next({status:403, message:'Failed to authenticate token.'});
-    // if everything is good, save to request for use in other routes. Note we don't do req.user=decoded, since that contains stale data
+    // if √ save to req for use in other routes. We don't do req.user=decoded, since that contains stale data
     User.findById(decoded.id).then(user => {
       req.user = user;
       next();
@@ -187,22 +192,22 @@ function ensureAuth (req, res, next) {
   });
 }
 
+function ensureAdmin (req, res, next) {
+  if (req.user.role !== 'admin')
+    return next({status: 403, message: "Insufficient user privilege"});
+  next();
+}
+
 // error handler
 app.use(function(err, req, res, next) {
   console.log(err);
   if (err.name == 'AuthenticationError') // Passport just gives us "Unauthorized", not sure how to get specifics
     err = {status:401, message:"Login failed, please check email address or password and try again."};
-  res
-    .status(err.status || 500)
+  res.status(err.status || 500)
     .json({message: err.message || err});
 });
 
 module.exports = Promise.all([
   sequelize.sync(),
-  new Promise((y,n) => {
-    app.listen(3001, function () {
-      console.log('Example app listening on port 3001!');
-      y();
-    });
-  })
+  new Promise((y,n) => app.listen(3001, () => y(console.log('Port 3001'))))
 ]);
