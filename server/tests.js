@@ -91,15 +91,15 @@ describe("App", () => {
       expect(f.length).to.be(0);
 
 
-      // Scores
-      //FIXME ensure candidate, user, feature exists
-
-      return _fetch(SERVER + '/score/1/2/3', {method: "POST", headers});
-    }).then(s => {
-      expect(s.user_id).to.be(1);
-      expect(s.candidate_id).to.be(1);
-      expect(s.feature_id).to.be(2);
-      expect(s.score).to.be(3);
+    //   // Scores
+    //   //FIXME ensure candidate, user, feature exists
+    //
+    //   return _fetch(SERVER + '/score/1/2/3', {method: "POST", headers});
+    // }).then(s => {
+    //   expect(s.user_id).to.be(1);
+    //   expect(s.candidate_id).to.be(1);
+    //   expect(s.feature_id).to.be(2);
+    //   expect(s.score).to.be(3);
 
       // Now let's start futzing manaully with some stuff
       let Score = sequelize.model('scores'),
@@ -111,8 +111,8 @@ describe("App", () => {
           {title: 'A', weight: 1},
           {title: 'B', weight: 1},
           {title: 'C', weight: 1}
-        ]),
-        Score.bulkCreate([
+        ])
+      ])).then(() => Score.bulkCreate([
           // Create an average of 2 on c:1 f:1
           {user_id: 1, candidate_id: 1, feature_id: 2, score: 1},
           {user_id: 2, candidate_id: 1, feature_id: 2, score: 2},
@@ -122,13 +122,10 @@ describe("App", () => {
           {user_id: 1, candidate_id: 2, feature_id: 3, score: 2},
           {user_id: 2, candidate_id: 2, feature_id: 3, score: 4},
           {user_id: 3, candidate_id: 2, feature_id: 3, score: 6},
-        ])
       ]));
     }).then(() => _fetch(SERVER + '/candidates', {headers})).then(json => {
       console.log('json', json);
-
       done();
-
     }).catch(e => console.log('Exception: ', e));
   });
 });

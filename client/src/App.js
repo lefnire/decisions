@@ -1,3 +1,7 @@
+//FIXME populate w/ scores on scoreCandidate
+//FIXME show averages
+//FIXME user.role and only admin can manage features
+
 import React, { Component } from 'react';
 import {Table, Col, Button, Modal, FormGroup, ControlLabel, HelpBlock, FormControl, Panel, Alert, ButtonToolbar} from 'react-bootstrap';
 import update from 'react-addons-update';
@@ -24,7 +28,6 @@ class Auth extends Component {
   register = e => {
     e.preventDefault();
     let {form} = this.state;
-    console.log(form);
     if (form.password !== form.confirmPassword)
       return this.setState({error: "Passwords don't match"});
     _fetch('/register', {method: 'POST', body: form}).then(json => {

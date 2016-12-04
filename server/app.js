@@ -13,7 +13,12 @@ const express = require('express'),
 nconf.argv().env().file({ file: 'config.json' });
 
 // ------- Database -------
-global.sequelize = new Sequelize(nconf.get('DATABASE_URL'));
+global.sequelize = new Sequelize(nconf.get('DATABASE_URL'), {
+  define:{
+    underscored: true,
+    freezeTableName:true
+  }
+});
 
 
 // User
@@ -46,11 +51,22 @@ let Candidate = sequelize.define('candidates', {
 // Score
 let Score = sequelize.define('scores', {
   // FIXME use proper sequelize for these foreign keys. Won't cascade effects
-  user_id: Sequelize.INTEGER,
-  candidate_id: Sequelize.INTEGER,
-  feature_id: Sequelize.INTEGER,
+  user_id: {type: Sequelize.INTEGER, primaryKey: true, onDelete: 'CASCADE'},
+  candidate_id: {type: Sequelize.INTEGER, primaryKey: true, onDelete: 'CASCADE'},
+  feature_id: {type: Sequelize.INTEGER, primaryKey: true, onDelete: 'CASCADE'},
   score: Sequelize.INTEGER
+}, {
+  // indexes: [
+  //   {
+  //     fields: ["user_id", "candidate_id", "feature_id"],
+  //     primary: true,
+  //   }
+  // ]
 });
+
+Score.belongsTo(User);
+Score.belongsTo(Candidate);
+Score.belongsTo(Feature);
 
 // ------- Express -------
 
@@ -103,7 +119,7 @@ app.get('/candidates', ensureAuth, (req, res, next) => {
   Promise.all([
     Candidate.findAll({raw: true}),
     Feature.findAll({raw: true}),
-    sequelize.query(`select candidate_id, feature_id, avg(score) from scores group by candidate_id, feature_id`, { type: sequelize.QueryTypes.SELECT})
+    sequelize.query(`select "candidate_id", "feature_id", avg(score) from scores group by "candidate_id", "feature_id"`, { type: sequelize.QueryTypes.SELECT})
   ]).then(arr => {
     let candidates = arr[0], features = arr[1], scores = arr[2];
     console.log({candidates, features, scores});
