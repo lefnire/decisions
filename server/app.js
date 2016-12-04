@@ -141,7 +141,23 @@ app.get('/candidates', ensureAuth, (req, res, next) => {
 });
 // TODO make sure ensureAuth v ensureAdmin is used properly in the following candidate-routes
 app.get('/candidates/:id', ensureAuth, (req, res, next) => {
-  Candidate.findById(req.params.id).then(c => res.json(c));
+  // http://stackoverflow.com/questions/34163209/postgres-aggregate-two-columns-into-one-item
+  sequelize.query(
+    `SELECT c.*, array_agg('[' || s.feature_id || ',' || s.score || ']') as features
+      FROM candidates c
+      JOIN scores s ON s.user_id=? AND s.candidate_id=?
+      GROUP BY c.id`,
+    {replacements: [req.user.id, req.params.id], type: sequelize.QueryTypes.SELECT}
+  ).then(arr => {
+    let candidate = arr[0];
+    candidate.features = _.transform(candidate.features, (m,v) => {
+      let f = JSON.parse(v);
+      m[f[0]] = f[1];
+      return m;
+    }, {});
+    res.json(candidate);
+  });
+  // Candidate.findById(req.params.id).then(c => res.json(c));
 });
 app.post('/candidates', ensureAuth, (req, res, next) => {
   Candidate.create(req.body).then(f => res.json(f));

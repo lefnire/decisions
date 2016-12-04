@@ -106,7 +106,9 @@ class ScoreCandidateModal extends Component {
       _fetch('/candidates/' + id),
       _fetch('/features')
     ]).then(arr => {
+      let form = this.state.form;
       this.setState({
+        form: _.assign(form, arr[0].features),
         candidate: arr[0],
         features: arr[1]
       });
