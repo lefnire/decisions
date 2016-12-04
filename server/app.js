@@ -40,7 +40,7 @@ passportLocalSequelize.attachToUser(User, {
 let Feature = sequelize.define('features', {
   title: Sequelize.STRING,
   description: Sequelize.TEXT,
-  weight: Sequelize.INTEGER
+  weight: {type: Sequelize.INTEGER, min: 0, max: 5}
 });
 
 // Candidate
@@ -55,7 +55,7 @@ let Score = sequelize.define('scores', {
   user_id: {type: Sequelize.INTEGER, primaryKey: true, onDelete: 'CASCADE'},
   candidate_id: {type: Sequelize.INTEGER, primaryKey: true, onDelete: 'CASCADE'},
   feature_id: {type: Sequelize.INTEGER, primaryKey: true, onDelete: 'CASCADE'},
-  score: Sequelize.INTEGER
+  score: {type: Sequelize.INTEGER, allowNull: false, min: 0, max: 5}
 }, {
   // indexes: [
   //   {

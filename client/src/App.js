@@ -45,7 +45,7 @@ class Auth extends Component {
         <Panel header="Log In">
           {error && (<Alert bsStyle="danger">{error}</Alert>)}
           {showRegister? (
-            <form noValidate onSubmit={this.register}>
+            <form onSubmit={this.register}>
               <FieldGroup
                 id="email"
                 placeholder="Email"
@@ -69,7 +69,7 @@ class Auth extends Component {
               <Button type="submit">Submit</Button>
             </form>
           ) : (
-          <form noValidate onSubmit={this.login}>
+          <form onSubmit={this.login}>
             <FieldGroup
               id="email"
               placeholder="Email"
@@ -135,9 +135,13 @@ class ScoreCandidateModal extends Component {
           <Modal.Title>{candidate.name}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          <form noValidate onSubmit={this.submit}>
+          <form onSubmit={this.submit}>
+            <HelpBlock>Enter scores between 0-5. All features must be scored (all-or-none, FIXME)</HelpBlock>
             {features.map(f => (
               <FieldGroup
+                type="number"
+                min="0"
+                max="5"
                 key={f.id}
                 id={"score_" + f.id}
                 placeholder={f.title}
@@ -194,7 +198,7 @@ class CandidateModal extends Component {
           <Modal.Title>{editing? form.name : 'Add Candidate'}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          <form noValidate onSubmit={this.submit}>
+          <form onSubmit={this.submit}>
             <FieldGroup
               id="candidateName"
               placeholder="Candidate Name"
@@ -266,7 +270,7 @@ class FeatureModal extends Component {
           <Modal.Title>{form.id? form.title : 'Add Feature'}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          <form noValidate onSubmit={this.submit}>
+          <form onSubmit={this.submit}>
             <FieldGroup
               id="featureTitle"
               placeholder="Title"
@@ -281,6 +285,9 @@ class FeatureModal extends Component {
             />
             <FieldGroup
               id="featureWeight"
+              type="number"
+              min="0"
+              max="5"
               placeholder="Weight"
               value={form.weight}
               onChange={this.changeText.bind(this, 'weight')}
@@ -323,6 +330,11 @@ class App extends Component {
     this.fetchStuff();
   };
 
+  logout = () => {
+    localStorage.removeItem('user');
+    window.location.href = '/';
+  };
+
   showScoreCandidate = id => this.refs.scoreCandidateModal.show(id);
   showFeature = id => this.refs.featureModal.show(id);
   showCandidate = id => this.refs.candidateModal.show(id);
@@ -343,6 +355,7 @@ class App extends Component {
     let isAdmin = user.role === 'admin';
     return (
       <div className="container">
+        <Button style={{position: 'absolute', top: 2, right: 2}} bsSize="small" onClick={this.logout}>Logout</Button>
         <CandidateModal ref="candidateModal" refresh={this.fetchStuff} />
         <FeatureModal ref="featureModal" refresh={this.fetchStuff} />
         <ScoreCandidateModal ref="scoreCandidateModal" refresh={this.fetchStuff} />
@@ -395,7 +408,7 @@ class App extends Component {
               ))}
             </tbody>
           </Table>
-          <Button onClick={() => this.showFeature()}>Add Feature</Button>
+          {isAdmin && <Button onClick={() => this.showFeature()}>Add Feature</Button>}
         </Col>
       </div>
     );
