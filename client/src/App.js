@@ -2,14 +2,14 @@
 //FIXME show averages
 
 import React, { Component } from 'react';
-import {Table, Col, Button, Modal, FormGroup, ControlLabel, HelpBlock, FormControl, Panel, Alert, ButtonToolbar} from 'react-bootstrap';
+import {Table, Col, Button, Modal, FormGroup, ControlLabel, HelpBlock, FormControl, Panel, Alert, ButtonToolbar, Jumbotron} from 'react-bootstrap';
 import update from 'react-addons-update';
 import _ from 'lodash';
 
-const SERVER = 'http://localhost:3001';
+const SERVER = 'https://hiring-regression.herokuapp.com';
+// const SERVER = 'http://localhost:3001';
 let user = localStorage.getItem('user');
 user = user && JSON.parse(user);
-console.log(user);
 
 class Auth extends Component {
   state = {
@@ -88,6 +88,7 @@ class Auth extends Component {
           )}
           <br/>
           <a onClick={this.toggleScreen}>{showRegister? "Login" : "Register"}</a>
+          <HelpBlock>Use a good email/password, no way to change it yet. @Kirill and other managers; tell Tyler when you've registered, I'll make you an admin - then you log out and back in.</HelpBlock>
         </Panel>
       </div>
     );
@@ -208,13 +209,15 @@ class CandidateModal extends Component {
               onChange={this.changeText.bind(this, 'name')}
             />
             <FieldGroup
-              id="candidateDescription"
+              id="candidateNotes"
               componentClass="textarea"
+              help="Any additional notes / comments you have about the candidate."
               placeholder="Notes"
-              value={form.description}
-              onChange={this.changeText.bind(this, 'description')}
+              value={form.notes}
+              onChange={this.changeText.bind(this, 'notes')}
             />
             <Panel header="Links">
+              <HelpBlock>Any relevant links (AngelList, Github, Twitter, LinkedIn, etc). The first link will be the candidate's href. TODO: allow re-ordering, deleting, etc.</HelpBlock>
               <ul>
                 {form.links && form.links.map((link, i) => (
                   <FieldGroup
@@ -277,18 +280,22 @@ class FeatureModal extends Component {
               id="featureTitle"
               placeholder="Title"
               value={form.title}
+              help="Short title, like '10yrs Experience'"
               onChange={this.changeText.bind(this, 'title')}
             />
             <FieldGroup
               id="featureDescription"
               placeholder="Description"
+              componentClass="textarea"
               value={form.description}
+              help="Notes about this feature; eg, more details about the type of experience, what to look for on a resume, etc."
               onChange={this.changeText.bind(this, 'description')}
             />
             <FieldGroup
               id="featureWeight"
               type="number"
-              min="0"
+              help="Number between 1-5 on how important this feature is. 5 for 'required', 1 for 'not that important'."
+              min="1"
               max="5"
               placeholder="Weight"
               value={form.weight}
@@ -309,7 +316,8 @@ class App extends Component {
   state = {
     candidates: [],
     features: [],
-    login: {}
+    login: {},
+    hideAbout: localStorage.getItem('hideAbout')
   };
 
   fetchStuff = () => {
@@ -337,6 +345,11 @@ class App extends Component {
     window.location.href = '/';
   };
 
+  hideAbout = () => {
+    this.setState({hideAbout: true});
+    localStorage.setItem('hideAbout', true);
+  };
+
   showScoreCandidate = id => this.refs.scoreCandidateModal.show(id);
   showFeature = id => this.refs.featureModal.show(id);
   showCandidate = id => this.refs.candidateModal.show(id);
@@ -353,11 +366,17 @@ class App extends Component {
 
   render() {
     if (!user) return <Auth onAuth={this.onAuth} />;
-    let {candidates, features} = this.state;
+    let {candidates, features, hideAbout} = this.state;
     let isAdmin = user.role === 'admin';
     return (
       <div className="container">
         <Button style={{position: 'absolute', top: 2, right: 2}} bsSize="small" onClick={this.logout}>Logout</Button>
+        {!hideAbout && (
+          <Jumbotron>
+            <p>A tool to help vet candidates. (1) Anyone adds candidates. (2) Managers add "features" (desired candidate attributes, eg "10yrs experience"). (3) Anyone can <strong>score</strong> a candidate 1-5 for each feature. The final score is an average weighted-sum. <a href="https://github.com/lefnire/hiring_regression" target="_blank">Code here</a></p>
+            <Button onClick={this.hideAbout}>Close</Button>
+          </Jumbotron>
+        )}
         <CandidateModal ref="candidateModal" refresh={this.fetchStuff} />
         <FeatureModal ref="featureModal" refresh={this.fetchStuff} />
         <ScoreCandidateModal ref="scoreCandidateModal" refresh={this.fetchStuff} />
@@ -376,9 +395,9 @@ class App extends Component {
                   <td>{c.score}</td>
                   <td>
                     <ButtonToolbar>
-                      <Button bsStyle="primary" bsSize="xsmall" onClick={this.showScoreCandidate.bind(this, c.id)}>Score</Button>
-                      {isAdmin && <Button bsSize="xsmall" onClick={this.showCandidate.bind(this, c.id)}>Edit</Button>}
-                      {isAdmin && <Button bsStyle="danger" bsSize="xsmall" onClick={this.deleteCandidate.bind(this, c.id)}>Delete</Button>}
+                      <Button bsStyle="primary" bsSize="xsmall" onClick={() => this.showScoreCandidate(c.id)}>Score</Button>
+                      {isAdmin && <Button bsSize="xsmall" onClick={() => this.showCandidate(c.id)}>Edit</Button>}
+                      {isAdmin && <Button bsStyle="danger" bsSize="xsmall" onClick={() => this.deleteCandidate(c.id)}>Delete</Button>}
                     </ButtonToolbar>
                   </td>
                 </tr>

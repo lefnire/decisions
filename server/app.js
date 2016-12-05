@@ -142,17 +142,19 @@ app.get('/candidates', ensureAuth, (req, res, next) => {
 // TODO make sure ensureAuth v ensureAdmin is used properly in the following candidate-routes
 app.get('/candidates/:id', ensureAuth, (req, res, next) => {
   // http://stackoverflow.com/questions/34163209/postgres-aggregate-two-columns-into-one-item
-  sequelize.query(
-    `SELECT c.*, array_agg('[' || s.feature_id || ',' || s.score || ']') as features
-      FROM candidates c
-      JOIN scores s ON s.user_id=? AND s.candidate_id=?
-      GROUP BY c.id`,
-    {replacements: [req.user.id, req.params.id], type: sequelize.QueryTypes.SELECT}
+  sequelize.query(`
+    SELECT c.*, array_agg('[' || s.feature_id || ',' || s.score || ']') as features
+    FROM candidates c
+    LEFT JOIN scores s ON s.user_id=:user AND s.candidate_id=c.id
+    WHERE c.id=:candidate
+    GROUP BY c.id
+    LIMIT 1
+    `, {replacements: {user: +req.user.id, candidate: +req.params.id}, type: sequelize.QueryTypes.SELECT}
   ).then(arr => {
     let candidate = arr[0];
     candidate.features = _.transform(candidate.features, (m,v) => {
       let f = JSON.parse(v);
-      m[f[0]] = f[1];
+      if (f) m[f[0]] = f[1];
       return m;
     }, {});
     res.json(candidate);
@@ -171,16 +173,13 @@ app.delete('/candidates/:id', ensureAuth, ensureAdmin, (req, res, next) => {
 
 // Scores
 app.post('/score/:candidate/:feature/:score', ensureAuth, (req, res, next) => {
-  let where = {
+  let obj = {
     user_id: req.user.id,
     candidate_id: req.params.candidate,
-    feature_id: req.params.feature
+    feature_id: req.params.feature,
+    score: +req.params.score
   };
-  Score.findOrCreate({where, defaults: where}).then(s => {
-    s = s[0];
-    s.score = +req.params.score;
-    s.save().then(s => res.json(s));
-  });
+  Score.upsert(obj).then(r => res.json({ok: true}));
 });
 
 function sign (user) {
@@ -225,5 +224,5 @@ app.use(function(err, req, res, next) {
 
 module.exports = Promise.all([
   sequelize.sync(),
-  new Promise((y,n) => app.listen(3001, () => y(console.log('Port 3001'))))
+  new Promise((y,n) => app.listen(nconf.get("PORT"), () => y(console.log('Port 3001'))))
 ]);
