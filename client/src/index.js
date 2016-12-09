@@ -1,7 +1,18 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
+import { Router, Route, Link, browserHistory } from 'react-router'
 import App from './App';
 import 'bootstrap/dist/css/bootstrap.css';
 import './index.css';
 
-ReactDOM.render(<App />, document.getElementById('root'));
+ReactDOM.render((
+    <Router history={browserHistory}>
+        <Route path="/" component={App}>
+            <Route path="about" component={About}/>
+            <Route path="comparison/:comparison_id" component={Users}>
+                <Route path="/user/:userId" component={User}/>
+            </Route>
+            <Route path="*" component={NoMatch}/>
+        </Route>
+    </Router>
+), document.getElementById('root'));

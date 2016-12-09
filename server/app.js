@@ -36,6 +36,11 @@ passportLocalSequelize.attachToUser(User, {
   // activationRequired: true
 });
 
+// Comparison
+let Comparison = sequelize.define('comparison', {
+  title: Sequelize.STRING,
+});
+
 // Feature
 let Feature = sequelize.define('features', {
   title: Sequelize.STRING,
@@ -49,6 +54,11 @@ let Candidate = sequelize.define('candidates', {
   notes: Sequelize.TEXT,
   links: Sequelize.ARRAY(Sequelize.STRING)
 });
+
+Feature.belongsTo(Comparison);
+Candidate.belongsTo(Comparison);
+Comparison.hasMany(Feature);
+Comparison.hasMany(Candidate);
 
 // Score
 let Score = sequelize.define('scores', {
@@ -65,6 +75,7 @@ let Score = sequelize.define('scores', {
   // ]
 });
 
+Score.belongsTo(User);
 Score.belongsTo(User);
 Score.belongsTo(Candidate);
 Score.belongsTo(Feature);
@@ -99,15 +110,36 @@ app.post('/login', passport.authenticate('local', localOpts), function(req, res)
   });
 });
 
-
-// Features
-app.get('/features', ensureAuth, (req, res, next) => {
-  Feature.findAll().then(f => res.json(f));
+// Comparison
+app.get('/:id', ensureAuth, (req, res, next) => {
+  Promise.all([
+    Comparison.findById(req.params.id, {include: [Feature]}),
+    sequelize.query(`
+      SELECT c.*,
+        ARRAY_AGG('{"feature_id":' || s.feature_id || ', "score_id":' || s.score || '}') as features,
+        SUM(s.score) as score
+      FROM candidates c
+      LEFT JOIN (
+        SELECT _s.feature_id, _s.candidate_id, AVG(_s.score) * (SELECT weight FROM features WHERE _s.feature_id=features.id) score
+        FROM scores _s
+        GROUP BY _s.feature_id, _s.candidate_id
+      ) s ON s.candidate_id=c.id
+      GROUP BY c.id
+      ORDER BY score DESC
+    `, {type: sequelize.QueryTypes.SELECT})
+  ]).then(arr => {
+      arr[1].forEach(c => {
+          c.features = c.features.map(f => JSON.parse(f));
+      });
+      res.json(_.sortBy(arr[1], 'score').reverse());
+  });
 });
+
+
 app.get('/features/:id', ensureAuth, (req, res, next) => {
   Feature.findById(req.params.id).then(f => res.json(f));
 });
-app.post('/features', ensureAuth, ensureAdmin, (req, res, next) => {
+app.post('/:doc/features', ensureAuth, ensureAdmin, (req, res, next) => {
   Feature.create(req.body).then(f => res.json(f));
 });
 app.put('/features/:id', ensureAuth, ensureAdmin, (req, res, next) => {
@@ -119,26 +151,6 @@ app.delete('/features/:id', ensureAuth, ensureAdmin, (req, res, next) => {
 
 
 // Candidates
-app.get('/candidates', ensureAuth, (req, res, next) => {
-  sequelize.query(`
-  SELECT c.*,
-    ARRAY_AGG('{"feature_id":' || s.feature_id || ', "score_id":' || s.score || '}') as features,
-    SUM(s.score) as score
-  FROM candidates c
-  LEFT JOIN (
-    SELECT _s.feature_id, _s.candidate_id, AVG(_s.score) * (SELECT weight FROM features WHERE _s.feature_id=features.id) score
-    FROM scores _s
-    GROUP BY _s.feature_id, _s.candidate_id
-  ) s ON s.candidate_id=c.id
-  GROUP BY c.id
-  ORDER BY score DESC
-  `, {type: sequelize.QueryTypes.SELECT}).then(candidates => {
-    candidates.forEach(c => {
-      c.features = c.features.map(f => JSON.parse(f));
-    });
-    res.json(_.sortBy(candidates, 'score').reverse());
-  });
-});
 // TODO make sure ensureAuth v ensureAdmin is used properly in the following candidate-routes
 app.get('/candidates/:id', ensureAuth, (req, res, next) => {
   // http://stackoverflow.com/questions/34163209/postgres-aggregate-two-columns-into-one-item
@@ -161,7 +173,7 @@ app.get('/candidates/:id', ensureAuth, (req, res, next) => {
   });
   // Candidate.findById(req.params.id).then(c => res.json(c));
 });
-app.post('/candidates', ensureAuth, (req, res, next) => {
+app.post('/:doc/candidates', ensureAuth, (req, res, next) => {
   Candidate.create(req.body).then(f => res.json(f));
 });
 app.put('/candidates/:id', ensureAuth, ensureAdmin, (req, res, next) => {
