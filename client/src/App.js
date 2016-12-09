@@ -392,7 +392,7 @@ class App extends Component {
               {candidates.map(c => (
                 <tr key={c.id}>
                   <td>{c.links && c.links[0]? <a href={c.links[0]} target="_blank">{c.name}</a> : c.name}</td>
-                  <td>{c.score}</td>
+                  <td>{~~c.score}</td>
                   <td>
                     <ButtonToolbar>
                       <Button bsStyle="primary" bsSize="xsmall" onClick={() => this.showScoreCandidate(c.id)}>Score</Button>

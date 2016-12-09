@@ -120,21 +120,21 @@ app.delete('/features/:id', ensureAuth, ensureAdmin, (req, res, next) => {
 
 // Candidates
 app.get('/candidates', ensureAuth, (req, res, next) => {
-  //FIXME do this all in SQL, save billions of CPU
-  Promise.all([
-    Candidate.findAll({raw: true}),
-    Feature.findAll({raw: true}),
-    sequelize.query(`select "candidate_id", "feature_id", avg(score) from scores group by "candidate_id", "feature_id"`, { type: sequelize.QueryTypes.SELECT})
-  ]).then(arr => {
-    let candidates = arr[0], features = arr[1], scores = arr[2];
-    console.log({candidates, features, scores});
+  sequelize.query(`
+  SELECT c.*,
+    ARRAY_AGG('{"feature_id":' || s.feature_id || ', "score_id":' || s.score || '}') as features,
+    SUM(s.score) as score
+  FROM candidates c
+  LEFT JOIN (
+    SELECT _s.feature_id, _s.candidate_id, AVG(_s.score) * (SELECT weight FROM features WHERE _s.feature_id=features.id) score
+    FROM scores _s
+    GROUP BY _s.feature_id, _s.candidate_id
+  ) s ON s.candidate_id=c.id
+  GROUP BY c.id
+  ORDER BY score DESC
+  `, {type: sequelize.QueryTypes.SELECT}).then(candidates => {
     candidates.forEach(c => {
-      c.score = 0;
-      features.forEach(f => {
-        let s = _.find(scores, {candidate_id: c.id, feature_id: f.id});
-        if (!s) return;
-        c.score += +s.avg * f.weight;
-      });
+      c.features = c.features.map(f => JSON.parse(f));
     });
     res.json(_.sortBy(candidates, 'score').reverse());
   });
