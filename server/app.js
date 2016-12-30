@@ -136,7 +136,7 @@ app.get('/candidates', ensureAuth, (req, res, next) => {
     candidates.forEach(c => {
       c.features = c.features.map(f => JSON.parse(f));
     });
-    res.json(_.sortBy(candidates, 'score').reverse());
+    res.json(_.sortBy(candidates, c => +c.score).reverse());
   });
 });
 // TODO make sure ensureAuth v ensureAdmin is used properly in the following candidate-routes

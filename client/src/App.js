@@ -147,7 +147,7 @@ class ScoreCandidateModal extends Component {
                 max="5"
                 key={f.id}
                 id={"score_" + f.id}
-                placeholder={f.title}
+                label={f.title}
                 value={form[f.id]}
                 onChange={this.changeText.bind(this, f.id)}
                 help={f.description}
