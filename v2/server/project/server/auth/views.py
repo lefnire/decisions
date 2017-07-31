@@ -1,6 +1,7 @@
 # project/server/auth/views.py
 
 
+import validators
 from flask import Blueprint, request, make_response, jsonify
 from flask.views import MethodView
 
@@ -102,14 +103,13 @@ class UserAPI(MethodView):
             auth_token = ''
         if auth_token:
             resp = User.decode_auth_token(auth_token)
-            if not isinstance(resp, str):
+            if bool(validators.uuid(resp)):
                 user = User.query.filter_by(id=resp).first()
                 responseObject = {
                     'status': 'success',
                     'data': {
                         'user_id': user.id,
                         'email': user.email,
-                        'admin': user.admin,
                         'registered_on': user.registered_on
                     }
                 }
@@ -140,7 +140,7 @@ class LogoutAPI(MethodView):
             auth_token = ''
         if auth_token:
             resp = User.decode_auth_token(auth_token)
-            if not isinstance(resp, str):
+            if bool(validators.uuid(resp)):
                 # mark the token as blacklisted
                 blacklist_token = BlacklistToken(token=auth_token)
                 try:
