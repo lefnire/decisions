@@ -6,8 +6,8 @@ import {Table, Col, Button, Modal, FormGroup, ControlLabel, HelpBlock, FormContr
 import update from 'react-addons-update';
 import _ from 'lodash';
 
-const SERVER = 'https://hiring-regression.herokuapp.com';
-// const SERVER = 'http://localhost:3001';
+// const SERVER = 'https://hiring-regression.herokuapp.com';
+const SERVER = 'http://localhost:3001';
 let user = localStorage.getItem('user');
 user = user && JSON.parse(user);
 
