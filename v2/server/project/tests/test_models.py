@@ -46,6 +46,18 @@ class TestModels(BaseTestCase):
     def _comparison_and_association(self):
         return self.user.comparisons[0].comparison, self.user.comparisons[0]
 
+    def _score_some(self):
+        comparison, _ = self._comparison_and_association()
+        for candidate in comparison.candidates:
+            for feature in comparison.features:
+                # For a simple test, just make an object 1, 2, 3 -rank scoreboard (test complex situations elsewhere)
+                score = {
+                    'Mac': 5,
+                    'Windows': 4,
+                    'Linux': 3
+                }[candidate.title]
+                self.user.score(candidate_id=candidate.id, feature_id=feature.id, score=score)
+
     def test_create_records(self):
         comparison, association = self._comparison_and_association()
         self.assertTrue(association.permission == m.PermissionEnum.owner)
@@ -67,16 +79,8 @@ class TestModels(BaseTestCase):
 
     def test_scoreboard_sanity_check(self):
         comparison, _ = self._comparison_and_association()
-        for candidate in comparison.candidates:
-            for feature in comparison.features:
-                # For a simple test, just make an object 1, 2, 3 -rank scoreboard (test complex situations elsewhere)
-                score = {
-                    'Mac': 5,
-                    'Windows': 4,
-                    'Linux': 3
-                }[candidate.title]
-                self.user.score(candidate_id=candidate.id, feature_id=feature.id, score=score)
-        scoreboard = comparison.get_scoreboard()
+        self._score_some()
+        scoreboard = comparison.scoreboard()
         assert scoreboard[0].title == 'Mac'
         assert scoreboard[1].title == 'Windows'
         assert scoreboard[2].title == 'Linux'
@@ -117,7 +121,7 @@ class TestModels(BaseTestCase):
                 }[candidate.title]
                 self.user.score(candidate_id=candidate.id, feature_id=feature.id, score=score)
                 self.friend.score(candidate_id=candidate.id, feature_id=feature.id, score=score-1)
-        scoreboard = comparison.get_scoreboard()
+        scoreboard = comparison.scoreboard()
         assert scoreboard[0].title == 'Mac'
         error_msg = "It should average between multiple users' scores"
         # 20 = 4 features * 5 score (default). 4.5 = AVG(user's score (5), friend's score (4))
@@ -127,7 +131,20 @@ class TestModels(BaseTestCase):
         assert scoreboard[2].title == 'Linux'
         assert scoreboard[2].score == 2.5*20, error_msg
 
+    def test_hunchboard(self):
+        comparison, _ = self._comparison_and_association()
+        self._score_some()
+        for i, candidate in enumerate(comparison.candidates):
+            self.user.hunch(candidate_id=candidate.id, score=5-i)
+        assert db.session.query(m.Hunch).count() == 3
+        results = comparison.hunchboard()
+        assert results[0].title == 'Mac'
+        assert results[1].title == 'Windows'
+        assert results[2].title == 'Linux'
+        print('Scores: {} {} {}'.format(results[0].score, results[1].score, results[2].score))
 
+    def test_participant_hunches_are_weighted(self): pass
+    def test_participant_scores_are_weighted(self): pass
     def test_update_attrs(self): pass
 
     # Later

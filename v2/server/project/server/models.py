@@ -5,6 +5,11 @@ import jwt
 import datetime
 import enum
 import uuid
+import pdb
+import tempfile
+import pandas as pd
+import numpy as np
+import tensorflow as tf
 from sqlalchemy.dialects import postgresql as pg
 from sqlalchemy.orm import relationship
 from sqlalchemy import text
@@ -108,13 +113,16 @@ class User(db.Model):
         db.session.commit()
         return user_comparison
 
-    def score(self, candidate_id, feature_id, score):
+    def _assert_candidate_permission(self, candidate_id):
         # Find the UserComparison, compare permission
         candidate = db.session.query(Candidate).filter_by(id=candidate_id).first()
-        user_comparison = db.session.query(UserComparison)\
+        user_comparison = db.session.query(UserComparison) \
             .filter_by(user_id=self.id, comparison_id=candidate.comparison_id).first()
         assert user_comparison and user_comparison.permission.value >= PermissionEnum.score.value, \
             "You don't have permission to score this candidate"
+
+    def score(self, candidate_id, feature_id, score):
+        self._assert_candidate_permission(candidate_id)
 
         # Is there an existing score to update? (Fix this later)
         score_rec = db.session.query(Score)\
@@ -126,6 +134,13 @@ class User(db.Model):
             db.session.add(score_rec)
         db.session.commit()
         return score_rec
+
+    def hunch(self, candidate_id, score):
+        self._assert_candidate_permission(candidate_id)
+        hunch = Hunch(user_id=self.id, candidate_id=candidate_id, score=score)
+        db.session.add(hunch)
+        db.session.commit()
+        return hunch
 
     def destroy(self):
         """
@@ -201,7 +216,10 @@ class Comparison(db.Model):
         """
         db.engine.execute(text('DELETE FROM comparisons WHERE id=:id'), id=self.id)
 
-    def get_scoreboard(self):
+    def scoreboard(self):
+        """
+        Gets a sorted list of candidates w/i a comparison, ordered by score average across voters
+        """
         query = """
             SELECT c.*,
               ARRAY_AGG('{"feature_id":' || s.feature_id || ', "score_id":' || s.score || '}') as features,
@@ -219,6 +237,84 @@ class Comparison(db.Model):
             ORDER BY score DESC
         """
         return db.engine.execute(text(query), comparison_id=self.id).fetchall()
+
+    @staticmethod
+    def input_fn(features, labels=None):
+        """Input builder function. See https://www.tensorflow.org/tutorials/wide"""
+        feature_cols = {str(k): tf.constant(features[k].values) for k in features.keys()}
+        if labels is None:
+            return feature_cols
+        label = tf.constant(labels.values)
+        return feature_cols, label
+
+    @staticmethod
+    def series_to_df(series):
+        return pd.DataFrame([row for row in series])
+
+    def train(self):
+        """Train our linear regression classifier (TODO make this a stochastic bg job)"""
+        query = """
+            SELECT hunches.id, hunches.score, -- hunch_id discarded, needed for unique grouping  
+              -- Collect features, ensure same feature-order for ML matrix
+              ARRAY_AGG(scores.score ORDER BY scores.feature_id) features
+            FROM candidates
+            INNER JOIN hunches ON hunches.candidate_id=candidates.id
+            INNER JOIN scores ON scores.candidate_id=candidates.id
+            WHERE comparison_id=%(comparison_id)s
+            GROUP BY hunches.id, hunches.score
+        """
+        df = pd.read_sql(query, db.engine, params={'comparison_id': self.id})
+        # Can't pull features straight from sql_df, it's squashed as [list(1,2,3), list(3,4,5)]; ie one-item rows
+        labels, features = df['score'], self.series_to_df(df['features'])
+
+        # https://github.com/tensorflow/tensorflow/blob/r1.2/tensorflow/examples/learn/wide_n_deep_tutorial.py
+        # TODO how to get feature.name in here? Ie tf.contrib.layers.real_valued_column("education_num")
+        # TODO if hunches exceed some #, use ANN instead of LinReg
+        model_dir = tempfile.mkdtemp()
+        feature_columns = [tf.contrib.layers.real_valued_column(str(k)) for k in features.keys()]
+        m = tf.contrib.learn.LinearRegressor(
+            model_dir=model_dir,
+            feature_columns=feature_columns
+        )
+        m.fit(input_fn=lambda: self.input_fn(features, labels), steps=200)
+        return m
+
+    def evaluate(self):
+        """TODO"""
+        pass
+
+    def predict(self, m):
+        # Make candidate prediction from our linear regression model"""
+        query = """
+            SELECT candidates.id,  
+              ARRAY_AGG(scores.score ORDER BY scores.feature_id) features
+            FROM candidates
+            INNER JOIN scores ON scores.candidate_id=candidates.id
+            WHERE comparison_id=%(comparison_id)s
+            GROUP BY candidates.id
+        """
+        df = pd.read_sql(query, db.engine, params={'comparison_id': self.id})
+        ids, features = df['id'], self.series_to_df(df['features'])
+
+        predictions = m.predict(input_fn=lambda: self.input_fn(features))
+        df = pd.DataFrame(predictions)
+        df['ids'] = ids
+        results = []
+        for row in df.values:
+            candidate = db.session.query(Candidate).filter_by(id=str(row[1])).first()
+            candidate.score = row[0]
+            results.append(candidate)
+        results.sort(key=lambda x: x.score, reverse=True)
+        return results
+
+    def hunchboard(self):
+        """
+        Gets a sorted list of candidates w/i a comparison, ordered by score average across voters.
+        Hunches learn features.weight, not scores.score
+        """
+        model = self.train()
+        predictions = self.predict(model)
+        return predictions
 
 
 class Feature(db.Model):
@@ -257,7 +353,18 @@ class Score(db.Model):
     user_id = db.Column(pg.UUID, db.ForeignKey('users.id', **fk_cascade), primary_key=True)
     candidate_id = db.Column(pg.UUID, db.ForeignKey('candidates.id', **fk_cascade), primary_key=True)
     feature_id = db.Column(pg.UUID, db.ForeignKey('features.id', **fk_cascade), primary_key=True)
-    score = db.Column(db.Integer, nullable=False)  # min: 0, max: 5
+    score = db.Column(db.Integer, nullable=False)  # TODO min: 0, max: 5
 
-    # TODO add id column or timestamp or such that we can have multiple scores for a user-candidate-feature
-    # (when voting once per day)
+
+class Hunch(db.Model):
+    """
+    A hunch is a user's score-of-the-moment. Can be done many times per day; unlike a score, which is singleton.
+    Hunches are used in a machine-learning algo to _learn_ the feature weights of the user
+    """
+    __tablename__ = 'hunches'
+
+    id = db.Column(pg.UUID, primary_key=True, default=uuid_default)
+    user_id = db.Column(pg.UUID, db.ForeignKey('users.id', **fk_cascade), primary_key=True)
+    candidate_id = db.Column(pg.UUID, db.ForeignKey('candidates.id', **fk_cascade), primary_key=True)
+    score = db.Column(db.Integer, nullable=False)  # TODO min: 0, max: 5
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
