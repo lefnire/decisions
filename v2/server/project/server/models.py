@@ -140,6 +140,10 @@ class User(db.Model):
         hunch = Hunch(user_id=self.id, candidate_id=candidate_id, score=score)
         db.session.add(hunch)
         db.session.commit()
+
+        # TODO kick this off in the background
+        hunch.candidate.comparison.train()
+
         return hunch
 
     def destroy(self):
@@ -205,8 +209,8 @@ class Comparison(db.Model):
     id = db.Column(pg.UUID, primary_key=True, default=uuid_default)
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
-    features = relationship('Feature')
-    candidates = relationship('Candidate')
+    features = relationship('Feature', backref='comparison')
+    candidates = relationship('Candidate', backref='comparison')
 
     def destroy(self):
         """
@@ -270,21 +274,24 @@ class Comparison(db.Model):
         # https://github.com/tensorflow/tensorflow/blob/r1.2/tensorflow/examples/learn/wide_n_deep_tutorial.py
         # TODO how to get feature.name in here? Ie tf.contrib.layers.real_valued_column("education_num")
         # TODO if hunches exceed some #, use ANN instead of LinReg
-        model_dir = tempfile.mkdtemp()
         feature_columns = [tf.contrib.layers.real_valued_column(str(k)) for k in features.keys()]
         m = tf.contrib.learn.LinearRegressor(
-            model_dir=model_dir,
+            # model_dir=tempfile.mkdtemp(),
             feature_columns=feature_columns
         )
         m.fit(input_fn=lambda: self.input_fn(features, labels), steps=200)
+        # m.save('model-' + self.id + '.tfl')
         return m
 
     def evaluate(self):
         """TODO"""
         pass
 
-    def predict(self, m):
+    def predict(self):
         # Make candidate prediction from our linear regression model"""
+        m = tf.contrib.learn.LinearRegressor()
+        # m.load('model-' + self.id + '.tfl')
+
         query = """
             SELECT candidates.id,  
               ARRAY_AGG(scores.score ORDER BY scores.feature_id) features
@@ -312,9 +319,7 @@ class Comparison(db.Model):
         Gets a sorted list of candidates w/i a comparison, ordered by score average across voters.
         Hunches learn features.weight, not scores.score
         """
-        model = self.train()
-        predictions = self.predict(model)
-        return predictions
+        return self.predict(model)
 
 
 class Feature(db.Model):
@@ -366,5 +371,7 @@ class Hunch(db.Model):
     id = db.Column(pg.UUID, primary_key=True, default=uuid_default)
     user_id = db.Column(pg.UUID, db.ForeignKey('users.id', **fk_cascade), primary_key=True)
     candidate_id = db.Column(pg.UUID, db.ForeignKey('candidates.id', **fk_cascade), primary_key=True)
+    candidate = relationship('Candidate')
+
     score = db.Column(db.Integer, nullable=False)  # TODO min: 0, max: 5
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
