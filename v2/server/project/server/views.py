@@ -136,10 +136,10 @@ class CandidateAPI(BaseView):
         candidate = db.session.query(m.Candidate).filter_by(id=id)
         if not candidate.first():
             return self.send('Candidate not found', code=404)
-        print(request.get_json())
         candidate.update(request.get_json())
         db.session.commit()
         return self.send(candidate.first().to_json())
+
 
 @app.route('/score/<candidate_id>/<feature_id>/<score>', methods=['POST'])
 @login_required
@@ -147,6 +147,12 @@ def score(candidate_id, feature_id, score):
     g.user.score(candidate_id, feature_id, score)
     return jsonify({})
 
+
+@app.route('/hunch/<candidate_id>/<score>', methods=['POST'])
+@login_required
+def hunch(candidate_id, score):
+    g.user.hunch(candidate_id, score)
+    return jsonify({})
 
 def register_api(view, endpoint, url, pk='id'):
     view_func = login_required(view.as_view(endpoint))

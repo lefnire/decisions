@@ -7,14 +7,19 @@ import {
     Route,
     Link
 } from 'react-router-dom';
-import {Table, Col, Button, Modal, FormGroup, ControlLabel, HelpBlock, FormControl, Panel, Alert, ButtonToolbar, Jumbotron} from 'react-bootstrap';
+import {Table, Col, Button, Modal, FormGroup, ControlLabel, HelpBlock, FormControl, Panel, Alert, ButtonToolbar,
+  Jumbotron, Navbar, Tooltip, Glyphicon, OverlayTrigger} from 'react-bootstrap';
 import update from 'react-addons-update';
 import _ from 'lodash';
+import ReactStars from 'react-stars';
+import ReactTable from 'react-table'
 
 // const SERVER = 'https://hiring-regression.herokuapp.com';
 const SERVER = 'http://localhost:5000';
 let user = localStorage.getItem('user');
 user = user && JSON.parse(user);
+
+let candidateModal, featureModal;
 
 class Auth extends Component {
   state = {
@@ -96,77 +101,6 @@ class Auth extends Component {
           <HelpBlock>Use a good email/password, no way to change it yet. @Kirill and other managers; tell Tyler when you've registered, I'll make you an admin - then you log out and back in.</HelpBlock>
         </Panel>
       </div>
-    );
-  }
-}
-
-class ScoreCandidateModal extends Component {
-  state = {
-    show: false,
-    form: {}
-  };
-  changeText = (key, e) => this.setState(update(this.state, {form: {[key]: {$set: e.target.value}}}));
-  show = id => {
-    const cid = this.props.comparison_id;
-    this.setState({show: true, form: {}});
-    Promise.all([
-      _fetch(`/comparisons/${cid}/candidates/${id}`),
-      _fetch(`/comparisons/${cid}/features/`)
-    ]).then(arr => {
-      let form = this.state.form;
-      this.setState({
-        form: _.assign(form, arr[0].data.features),
-        candidate: arr[0].data,
-        features: arr[1].data
-      });
-    });
-  };
-  close = () => this.setState({show: false});
-  submit = e => {
-    e.preventDefault();
-    let {form, candidate} = this.state;
-    //FIXME add a bulk-update route
-    Promise.all(_.transform(form, (m,v,k) => {
-      m.push(_fetch(`/score/${candidate.id}/${k}/${v}`, {method: "POST"}));
-      return m;
-    }, [])).then(() => {
-      this.close();
-      this.props.refresh();
-    });
-    return false;
-  };
-  render() {
-    let {form, show, candidate, features} = this.state;
-    return (
-      <Modal show={show} onHide={this.close}>
-        {candidate && (<div>
-        <Modal.Header closeButton>
-          <Modal.Title>{candidate.title}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <form onSubmit={this.submit}>
-            <HelpBlock>Enter scores between 0-5. All features must be scored (all-or-none, FIXME)</HelpBlock>
-            {features.map(f => (
-              <FieldGroup
-                type="number"
-                min="0"
-                max="5"
-                key={f.id}
-                id={"score_" + f.id}
-                label={f.title}
-                value={form[f.id]}
-                onChange={this.changeText.bind(this, f.id)}
-                help={f.description}
-              />
-            ))}
-            <Button type="submit">Score</Button>
-          </form>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button onClick={this.close}>Close</Button>
-        </Modal.Footer>
-        </div>)}
-      </Modal>
     );
   }
 }
@@ -258,6 +192,7 @@ class FeatureModal extends Component {
     form: {}
   };
   changeText = (key, e) => this.setState(update(this.state, {form: {[key]: {$set: e.target.value}}}));
+  changeStar = (val) => this.setState(update(this.state, {form: {weight: {$set: val}}}));
   close = () => this.setState({show: false});
   show = id => {
     this.setState({show: true, editing: !!id, form: {}});
@@ -302,16 +237,14 @@ class FeatureModal extends Component {
               help="Notes about this feature; eg, more details about the type of experience, what to look for on a resume, etc."
               onChange={this.changeText.bind(this, 'description')}
             />
-            <FieldGroup
+            <label>Importance</label>
+            <ReactStars
+              half={false}
+              onChange={this.changeStar}
               id="featureWeight"
-              type="number"
-              help="Number between 1-5 on how important this feature is. 5 for 'required', 1 for 'not that important'."
-              min="1"
-              max="5"
-              placeholder="Weight"
               value={form.weight}
-              onChange={this.changeText.bind(this, 'weight')}
             />
+            <span className="help-block">Number between 1-5 on how important this feature is. 5 for 'required', 1 for 'not that important'.</span>
             <Button type="submit">Submit</Button>
           </form>
         </Modal.Body>
@@ -323,13 +256,105 @@ class FeatureModal extends Component {
   }
 }
 
-class Comparison extends Component {
-  state = {
-    candidates: [],
-    features: [],
-    login: {},
-    hideAbout: localStorage.getItem('hideAbout')
+class CandidateSub extends Component {
+  showCandidate = () => candidateModal.show(this.props.candidate.id);
+  deleteCandidate = () => {
+    const {comparison_id, candidate} = this.props;
+    if (confirm('Delete this candidate?')) {
+      _fetch(`/comparisons/${comparison_id}/candidates/${candidate.id}`, {method: "DELETE"}).then(this.props.refresh);
+    }
   };
+
+  getFeature = (feature_id, key) => _.get(_.find(this.props.candidate.features, {feature_id}), key);
+
+  onChangeStar = (fid, val) => {
+    const {comparison_id, candidate} = this.props;
+    _fetch(`/score/${candidate.id}/${fid}/${val}`, {method: "POST"}); // FIXME then-refresh closes expander, using "done" button workaround
+  };
+  renderScoreCell = ({original: feature}) => (
+    <ReactStars
+      half={false}
+      value={this.getFeature(feature.id, 'score')}
+      onChange={val => this.onChangeStar(feature.id, val)}
+    />
+  );
+
+  renderScoresTable = () => {
+    const {features, candidate: c} = this.props;
+    const columns = [{
+      Header: 'Feature',
+      accessor: 'title'
+    }, {
+      Header: 'Score',
+      Cell: this.renderScoreCell
+    }, {
+      Header: 'Weighted Score',
+      Cell: ({original: feature}) => this.getFeature(feature.id, 'weighted_score')
+    }];
+
+    return (
+      <ReactTable
+        className="margins"
+        data={features}
+        columns={columns}
+        minRows={0}
+        showPagination={false}
+        SubComponent={this.renderCandidateSub}
+      />
+    );
+  };
+
+  render() {
+    const {features, candidate: c} = this.props;
+    return (
+      <div className="margins">
+        {/*c.links && c.links[0]? <a href={c.links[0]} target="_blank">{c.title}</a> : c.title*/}
+        {c.description && <small>{c.description}</small>}
+        {this.renderScoresTable()}
+        <div className="clearfix" />
+        <ButtonToolbar className="pull-right">
+          <Button bsSize="xsmall" bsStyle="primary" onClick={this.props.refresh}>Done</Button>
+          <Button bsSize="xsmall" onClick={this.showCandidate}>Edit</Button>
+          <Button bsStyle="danger" bsSize="xsmall" onClick={this.deleteCandidate}>Delete</Button>
+        </ButtonToolbar>
+      </div>
+    );
+  }
+}
+
+class FeatureSub extends Component {
+  showFeature = () => featureModal.show(this.props.feature.id);
+
+  deleteFeature = () => {
+    const {feature, comparison_id} = this.props;
+    if (confirm('Delete this feature?')) {
+      _fetch(`/comparisons/${comparison_id}/features/${feature.id}`, {method: "DELETE"}).then(this.props.refresh);
+    }
+  };
+
+  render() {
+    const {feature: f} = this.props;
+    return (
+      <div className="margins">
+        {f.description && <small>{f.description}</small>}
+        <div className="clearfix" />
+        <ButtonToolbar className="pull-right">
+          <Button bsSize="xsmall" onClick={this.showFeature}>Edit</Button>
+          <Button bsStyle="danger" bsSize="xsmall" onClick={this.deleteFeature}>Delete</Button>
+        </ButtonToolbar>
+      </div>
+    )
+  }
+}
+
+class Comparison extends Component {
+  constructor() {
+    super();
+    this.state = {
+      candidates: [],
+      features: []
+    };
+  }
 
   fetchStuff = () => {
     const cid = this.props.match.params.comparison_id;
@@ -343,113 +368,187 @@ class Comparison extends Component {
   };
 
   componentDidMount() {
-    if (user) this.fetchStuff();
+    this.fetchStuff();
   }
 
-  hideAbout = () => {
-    this.setState({hideAbout: true});
-    localStorage.setItem('hideAbout', true);
+  renderCandidateSub = ({original}) => (
+    <CandidateSub
+      candidate={original}
+      features={this.state.features}
+      refresh={this.fetchStuff}
+      comparison_id={this.props.match.params.comparison_id}
+    />
+  );
+  renderScoreCell = ({original}) => {
+    const {features} = this.state;
+    const allFeaturesScored = _.reduce(features, (acc, feature) => {
+      return acc && _.find(original.features, {feature_id: feature.id});
+    }, true);
+    debugger;
+    if (allFeaturesScored) {return original.score;}
+    return (
+      <div>
+        <OverlayTrigger
+          placement="right"
+          overlay={<Tooltip id="score-all-features">Please score all features</Tooltip>}
+        >
+          <Glyphicon glyph="alert" />
+        </OverlayTrigger>
+      </div>
+    );
+  };
+  renderHunchCell = ({original}) => (
+    <ReactStars
+      half={false}
+      onChange={val => _fetch(`/hunch/${original.id}/${val}`, {method: 'POST'}).then(this.fetchStuff)}
+    />
+  );
+  renderCandidates = () => {
+    const {candidates} = this.state;
+    const columns = [{
+      Header: 'Name',
+      accessor: 'title'
+    }, {
+      Header: 'Weighted Score',
+      id: 'weighted-score',
+      Cell: this.renderScoreCell
+    }, {
+      Header: 'Hunch',
+      id: 'hunch',
+      Cell: this.renderHunchCell
+    }];
+
+    return (
+      <Col md={6}>
+        <h3>Candidates</h3>
+        <ReactTable
+          data={candidates}
+          columns={columns}
+          minRows={0}
+          showPagination={false}
+          SubComponent={this.renderCandidateSub}
+        />
+        <Button
+          bsStyle="primary"
+          className="margin-top pull-right"
+          onClick={() => candidateModal.show()}
+        >Add Candidate</Button>
+      </Col>
+    );
   };
 
-  showScoreCandidate = id => this.refs.scoreCandidateModal.show(id);
-  showFeature = id => this.refs.featureModal.show(id);
-  showCandidate = id => this.refs.candidateModal.show(id);
-  deleteFeature = id => {
+  onChangeFeatureWeight = (feature, val) => {
     const cid = this.props.match.params.comparison_id;
-    if (confirm('Delete this feature?')) {
-      _fetch(`/comparisons/${cid}/features/${id}`, {method: "DELETE"}).then(() => this.fetchStuff());
-    }
+    feature.weight = val;
+    _fetch(`/comparisons/${cid}/features/${feature.id}`, {method: "PUT", body: feature}).then(this.fetchStuff)
   };
-  deleteCandidate = id => {
-    const cid = this.props.match.params.comparison_id;
-    if (confirm('Delete this candidate?')) {
-      _fetch(`/comparisons/${cid}/candidates/${id}`, {method: "DELETE"}).then(() => this.fetchStuff());
-    }
+  renderFeatureWeight = ({original}) => (
+    <ReactStars
+      value={original.weight}
+      half={false}
+      onChange={val => this.onChangeFeatureWeight(original, val)}
+    />
+  );
+  renderFeatureSub = ({original}) => (
+    <FeatureSub
+      feature={original}
+      refresh={this.fetchStuff}
+      comparison_id={this.props.match.params.comparison_id}
+    />
+  );
+  renderFeatures = () => {
+    const {features} = this.state;
+    const columns = [{
+      Header: 'Name',
+      accessor: 'title'
+    }, {
+      Header: 'Importance',
+      accessor: 'weight',
+      Cell: this.renderFeatureWeight
+    }];
+
+    return (
+      <Col md={6}>
+        <h3>Features</h3>
+        <ReactTable
+          data={features}
+          columns={columns}
+          minRows={0}
+          showPagination={false}
+          SubComponent={this.renderFeatureSub}
+        />
+        <Button
+          className="margin-top pull-right"
+          onClick={() => featureModal.show()}
+          bsStyle="primary"
+        >Add Feature</Button>
+      </Col>
+    );
   };
 
   render() {
-    const {candidates, features, hideAbout} = this.state;
     const cid = this.props.match.params.comparison_id;
-    const isAdmin = true;
     return (
       <div>
-        {!hideAbout && (
-          <Jumbotron>
-            <p>A tool to help vet candidates. (1) Anyone adds candidates. (2) Managers add "features" (desired candidate attributes, eg "10yrs experience"). (3) Anyone can <strong>score</strong> a candidate 1-5 for each feature. The final score is an average weighted-sum. <a href="https://github.com/lefnire/hiring_regression" target="_blank">Code here</a></p>
-            <Button onClick={this.hideAbout}>Close</Button>
-          </Jumbotron>
-        )}
-        <CandidateModal ref="candidateModal" refresh={this.fetchStuff} comparison_id={cid} />
-        <FeatureModal ref="featureModal" refresh={this.fetchStuff} comparison_id={cid} />
-        <ScoreCandidateModal ref="scoreCandidateModal" refresh={this.fetchStuff} comparison_id={cid} />
-        <Col md={6}>
-          <h3>Candidates</h3>
-          <Table striped bordered condensed hover>
-            <thead><tr>
-              <th>Name</th>
-              <th>Score</th>
-              <th></th>
-            </tr></thead>
-            <tbody>
-              {candidates.map(c => (
-                <tr key={c.id}>
-                  <td>{c.links && c.links[0]? <a href={c.links[0]} target="_blank">{c.title}</a> : c.title}</td>
-                  <td>{~~c.score}</td>
-                  <td>
-                    <ButtonToolbar>
-                      <Button bsStyle="primary" bsSize="xsmall" onClick={() => this.showScoreCandidate(c.id)}>Score</Button>
-                      {isAdmin && <Button bsSize="xsmall" onClick={() => this.showCandidate(c.id)}>Edit</Button>}
-                      {isAdmin && <Button bsStyle="danger" bsSize="xsmall" onClick={() => this.deleteCandidate(c.id)}>Delete</Button>}
-                    </ButtonToolbar>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-          <Button onClick={() => this.showCandidate()}>Add Candidate</Button>
-        </Col>
-        <Col md={6}>
-          <h3>Features</h3>
-          <Table striped bordered condensed hover>
-            <thead><tr>
-              <th>Feature</th>
-              <th>Weight</th>
-              <th></th>
-            </tr></thead>
-            <tbody>
-              {features.map(f => (
-                <tr key={f.id}>
-                  <td>{f.title}</td>
-                  <td>{f.weight}</td>
-                  <td>
-                    {isAdmin && <ButtonToolbar>
-                      <Button bsSize="xsmall" onClick={this.showFeature.bind(this, f.id)}>Edit</Button>
-                      <Button bsStyle="danger" bsSize="xsmall" onClick={this.deleteFeature.bind(this, f.id)}>Delete</Button>
-                    </ButtonToolbar>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-          {isAdmin && <Button onClick={() => this.showFeature()}>Add Feature</Button>}
-        </Col>
+        <CandidateModal ref={c => candidateModal = c} refresh={this.fetchStuff} comparison_id={cid} />
+        <FeatureModal ref={c => featureModal = c} refresh={this.fetchStuff} comparison_id={cid} />
+        {this.renderCandidates()}
+        {this.renderFeatures()}
       </div>
     );
   }
 }
 
-class App extends Component {
-  constructor() {
-    super();
-    this.state = {
-      comparisons: []
-    }
+class Comparisons extends Component {
+  state = {
+    comparisons: []
+  };
+
+  componentDidMount() {
+    this.fetchComparisons();
   }
 
+  fetchComparisons = () => _fetch('/comparisons/').then(data => this.setState({comparisons: data.data}));
+  createComparison = () => _fetch('/comparisons/', {method: 'POST', body: {title: 'Test'}}).then(this.fetchComparisons);
+
+  render() {
+    const columns = [{
+      Header: 'Name',
+      accessor: 'title',
+      Cell: ({value, original}) => <Link to={`/comparisons/${original.id}`}>{value}</Link>
+    }, {
+      Header: '',
+      Cell: props => (
+        <ButtonToolbar>
+          <Button bsSize="xsmall" onClick={_.noop}>Edit</Button>
+          <Button bsStyle="danger" bsSize="xsmall" onClick={_.noop}>Delete</Button>
+        </ButtonToolbar>
+      )
+    }];
+
+    return (
+      <div>
+        <ReactTable
+          data={this.state.comparisons}
+          columns={columns}
+          minRows={0}
+          showPagination={false}
+        />
+        <Button
+          className="margin-top pull-right"
+          bsStyle="primary"
+          onClick={this.createComparison}
+        >Add Comparison</Button>
+      </div>
+    )
+  }
+}
+
+class App extends Component {
   onAuth = _user => {
     user = _user;
     localStorage.setItem('user', JSON.stringify(user));
-    this.fetchComparisons();
+    window.location.href = '/comparisons/';
   };
 
   logout = () => {
@@ -457,30 +556,38 @@ class App extends Component {
     window.location.href = '/';
   };
 
-  fetchComparisons = () => {
-    _fetch('/comparisons/').then(data => this.setState({comparisons: data.data}));
-  };
-
-  componentDidMount() {
-    if (user) this.fetchComparisons();
-  }
-
-  createComparison = () => _fetch('/comparisons/', {method: 'POST', body: {title: 'Test'}});
+  renderNavbar = () => (
+    <Navbar>
+      <Navbar.Header>
+        <Navbar.Brand>
+          <a href="#">Decisioneer</a>
+        </Navbar.Brand>
+        <Navbar.Toggle />
+      </Navbar.Header>
+      <Navbar.Collapse>
+        <Navbar.Text>
+          <Navbar.Link href="/comparisons/">Comparisons</Navbar.Link>
+        </Navbar.Text>
+        <Navbar.Text pullRight>
+            <Navbar.Link href="#" onClick={this.logout}>Logout</Navbar.Link>
+        </Navbar.Text>
+      </Navbar.Collapse>
+    </Navbar>
+  );
 
   render() {
     if (!user) return <Auth onAuth={this.onAuth} />;
 
     return (
-        <Router>
+      <Router>
+        <div>
+          {this.renderNavbar()}
           <div className="container">
-            <Button style={{position: 'absolute', top: 2, right: 2}} bsSize="small" onClick={this.logout}>Logout</Button>
-            <Button onClick={this.createComparison}>Create Comparison</Button>
-            {this.state.comparisons.map(c => (
-                <Link to={`/comparisons/${c.id}`} key={c.id}>{c.title}</Link>
-            ))}
+            <Route path="/comparisons/" exact component={Comparisons} />
             <Route path="/comparisons/:comparison_id" component={Comparison} />
           </div>
-        </Router>
+        </div>
+      </Router>
     )
   }
 }

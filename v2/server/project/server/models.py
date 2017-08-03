@@ -5,6 +5,7 @@ import jwt
 import datetime
 import enum
 import uuid
+import json
 import pdb
 import tempfile
 import pandas as pd
@@ -223,15 +224,16 @@ class Comparison(db.Model):
         """
         query = """
             SELECT c.*,
-              ARRAY_AGG('{"feature_id":' || s.feature_id || ', "score_id":' || s.score || '}') as features,
+              ARRAY_AGG('{"feature_id":"' || s.feature_id || '", "weighted_score":' || s.weighted_score || ', "score":' || s.score || '}') as features,
               SUM(s.score) as score
             FROM candidates c
             LEFT JOIN (
               SELECT _s.feature_id, 
                 _s.candidate_id, 
-                AVG(_s.score) * (SELECT weight FROM features WHERE _s.feature_id=features.id) score
+                _s.score,
+                AVG(_s.score) * (SELECT weight FROM features WHERE _s.feature_id=features.id) weighted_score
               FROM scores _s
-              GROUP BY _s.feature_id, _s.candidate_id
+              GROUP BY _s.feature_id, _s.candidate_id, _s.score
             ) s ON s.candidate_id=c.id
             WHERE c.comparison_id=:comparison_id
             GROUP BY c.id
@@ -245,7 +247,7 @@ class Comparison(db.Model):
             title=r.title,
             description=r.description,
             links=r.links,
-            features=r.features,
+            features=[json.loads(f) for f in r.features if f],
             score=r.score
         ) for r in rows]
 
