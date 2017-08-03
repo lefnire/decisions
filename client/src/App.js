@@ -7,7 +7,7 @@ import update from 'react-addons-update';
 import _ from 'lodash';
 
 // const SERVER = 'https://hiring-regression.herokuapp.com';
-const SERVER = 'http://localhost:3001';
+const SERVER = 'http://localhost:5000';
 let user = localStorage.getItem('user');
 user = user && JSON.parse(user);
 
@@ -20,8 +20,8 @@ class Auth extends Component {
   changeText = (key, e) => this.setState(update(this.state, {form: {[key]: {$set: e.target.value}}}));
   login = e => {
     e.preventDefault();
-    _fetch('/login', {method: 'POST', body: this.state.form}).then(json => {
-      if (json.message) return this.setState({error: json.message});
+    _fetch('/auth/login', {method: 'POST', body: this.state.form}).then(json => {
+      if (!json.auth_token) return this.setState({error: json.message});
       this.props.onAuth(json);
     });
     return false;
@@ -31,7 +31,7 @@ class Auth extends Component {
     let {form} = this.state;
     if (form.password !== form.confirmPassword)
       return this.setState({error: "Passwords don't match"});
-    _fetch('/register', {method: 'POST', body: form}).then(json => {
+    _fetch('/auth/register', {method: 'POST', body: form}).then(json => {
       if (json.message) return this.setState({error: json.message});
       this.props.onAuth(json);
     });
@@ -439,7 +439,7 @@ class App extends Component {
 function _fetch (url, data={}) {
   _.defaults(data, {method: 'GET', headers: {}});
   _.defaults(data.headers, {'Content-Type': 'application/json'});
-  if (user) data.headers['x-access-token'] = user.token;
+  if (user) data.headers['Authorization'] = 'Bearer ' + user.auth_token;
   if (data.body) data.body = JSON.stringify(data.body);
   return fetch(SERVER + url, data).then(res => res.json()); //.catch(e => console.log("Error: ", e));
 }
