@@ -84,17 +84,17 @@ class FeatureAPI(BaseView):
             return self.send('Feature not found', code=404)
         db.session.delete(feature)
         db.session.commit()
-        return self.send(feature)
+        return self.send(feature.to_json())
 
     def put(self, cid, id):
         if not self.get_comparison(cid):
             return self.send('Comparison not found', code=404)
-        feature = db.session.query(m.Feature).filter_by(id=id).first()
-        if not feature:
+        feature = db.session.query(m.Feature).filter_by(id=id)
+        if not feature.first():
             return self.send('Feature not found', code=404)
-        feature.update(**request.get_json())
+        feature.update(request.get_json())
         db.session.commit()
-        return self.send(feature)
+        return self.send(feature.first().to_json())
 
 
 class CandidateAPI(BaseView):
@@ -107,12 +107,13 @@ class CandidateAPI(BaseView):
         return self.send(candidate.to_json())
 
     def get(self, cid, id):
-        if not self.get_comparison(cid):
+        join = self.get_comparison(cid)
+        if not join:
             return self.send('Comparison not found', code=404)
 
         if id is None:
-            candidates = db.session.query(m.Candidate).filter_by(comparison_id=cid).all()
-            return self.send([f.to_json() for f in candidates])
+            candidates = join.comparison.scoreboard(to_dict=True)
+            return self.send(candidates)
 
         candidate = db.session.query(m.Candidate).filter_by(id=id).first()
         if not candidate:
@@ -127,17 +128,24 @@ class CandidateAPI(BaseView):
             return self.send('Candidate not found', code=404)
         db.session.delete(candidate)
         db.session.commit()
-        return self.send(candidate)
+        return self.send(candidate.to_json())
 
     def put(self, cid, id):
         if not self.get_comparison(cid):
             return self.send('Comparison not found', code=404)
-        candidate = db.session.query(m.Candidate).filter_by(id=id).first()
-        if not candidate:
+        candidate = db.session.query(m.Candidate).filter_by(id=id)
+        if not candidate.first():
             return self.send('Candidate not found', code=404)
-        candidate.update(**request.get_json())
+        print(request.get_json())
+        candidate.update(request.get_json())
         db.session.commit()
-        return self.send(candidate)
+        return self.send(candidate.first().to_json())
+
+@app.route('/score/<candidate_id>/<feature_id>/<score>', methods=['POST'])
+@login_required
+def score(candidate_id, feature_id, score):
+    g.user.score(candidate_id, feature_id, score)
+    return jsonify({})
 
 
 def register_api(view, endpoint, url, pk='id'):

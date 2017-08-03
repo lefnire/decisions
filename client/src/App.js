@@ -2,6 +2,11 @@
 //FIXME show averages
 
 import React, { Component } from 'react';
+import {
+  BrowserRouter as Router,
+    Route,
+    Link
+} from 'react-router-dom';
 import {Table, Col, Button, Modal, FormGroup, ControlLabel, HelpBlock, FormControl, Panel, Alert, ButtonToolbar, Jumbotron} from 'react-bootstrap';
 import update from 'react-addons-update';
 import _ from 'lodash';
@@ -102,16 +107,17 @@ class ScoreCandidateModal extends Component {
   };
   changeText = (key, e) => this.setState(update(this.state, {form: {[key]: {$set: e.target.value}}}));
   show = id => {
+    const cid = this.props.comparison_id;
     this.setState({show: true, form: {}});
     Promise.all([
-      _fetch('/candidates/' + id),
-      _fetch('/features')
+      _fetch(`/comparisons/${cid}/candidates/${id}`),
+      _fetch(`/comparisons/${cid}/features/`)
     ]).then(arr => {
       let form = this.state.form;
       this.setState({
-        form: _.assign(form, arr[0].features),
-        candidate: arr[0],
-        features: arr[1]
+        form: _.assign(form, arr[0].data.features),
+        candidate: arr[0].data,
+        features: arr[1].data
       });
     });
   };
@@ -135,7 +141,7 @@ class ScoreCandidateModal extends Component {
       <Modal show={show} onHide={this.close}>
         {candidate && (<div>
         <Modal.Header closeButton>
-          <Modal.Title>{candidate.name}</Modal.Title>
+          <Modal.Title>{candidate.title}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <form onSubmit={this.submit}>
@@ -173,9 +179,11 @@ class CandidateModal extends Component {
   };
   changeText = (key, e) => this.setState(update(this.state, {form: {[key]: {$set: e.target.value}}}));
   show = id => {
+    const cid = this.props.comparison_id;
     this.setState({show: true, editing: !!id, form: {links: []}});
     if (!!id) {
-      _fetch('/candidates/' + id).then(form => {
+      _fetch(`/comparisons/${cid}/candidates/${id}`).then(data => {
+        const form = data.data;
         form.links = form.links || [];
         this.setState({form})
       });
@@ -185,8 +193,9 @@ class CandidateModal extends Component {
   submit = e => {
     e.preventDefault();
     let {form, editing} = this.state;
-    let p = editing? _fetch('/candidates/' + form.id, {method: 'PUT', body: form})
-      : _fetch('/candidates', {method: 'POST', body: form});
+    const cid = this.props.comparison_id;
+    let p = editing? _fetch(`/comparisons/${cid}/candidates/${form.id}`, {method: 'PUT', body: form})
+      : _fetch(`/comparisons/${cid}/candidates/`, {method: 'POST', body: form});
     p.then(() => {
       this.close();
       this.props.refresh();
@@ -198,23 +207,23 @@ class CandidateModal extends Component {
     return (
       <Modal show={show} onHide={this.close}>
         <Modal.Header closeButton>
-          <Modal.Title>{editing? form.name : 'Add Candidate'}</Modal.Title>
+          <Modal.Title>{editing? form.title : 'Add Candidate'}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <form onSubmit={this.submit}>
             <FieldGroup
               id="candidateName"
               placeholder="Candidate Name"
-              value={form.name}
-              onChange={this.changeText.bind(this, 'name')}
+              value={form.title}
+              onChange={this.changeText.bind(this, 'title')}
             />
             <FieldGroup
               id="candidateNotes"
               componentClass="textarea"
               help="Any additional notes / comments you have about the candidate."
               placeholder="Notes"
-              value={form.notes}
-              onChange={this.changeText.bind(this, 'notes')}
+              value={form.description}
+              onChange={this.changeText.bind(this, 'description')}
             />
             <Panel header="Links">
               <HelpBlock>Any relevant links (AngelList, Github, Twitter, LinkedIn, etc). The first link will be the candidate's href. TODO: allow re-ordering, deleting, etc.</HelpBlock>
@@ -252,15 +261,17 @@ class FeatureModal extends Component {
   close = () => this.setState({show: false});
   show = id => {
     this.setState({show: true, editing: !!id, form: {}});
+    const cid = this.props.comparison_id;
     if (!!id) {
-      _fetch('/features/' + id).then(form => this.setState({form}));
+      _fetch(`/comparisons/${cid}/features/${id}`).then(data => this.setState({form: data.data}));
     }
   };
   submit = e => {
     e.preventDefault();
+    const cid = this.props.comparison_id;
     let {form, editing} = this.state;
-    let p = editing? _fetch(`/features/` + form.id, {method: "PUT" , body: form})
-      : _fetch('/features', {method: 'POST', body: this.state.form});
+    let p = editing? _fetch(`/comparisons/${cid}/features/${form.id}`, {method: "PUT" , body: form})
+      : _fetch(`/comparisons/${cid}/features/`, {method: 'POST', body: this.state.form});
     p.then(() => {
       this.close();
       this.props.refresh();
@@ -312,7 +323,7 @@ class FeatureModal extends Component {
   }
 }
 
-class App extends Component {
+class Comparison extends Component {
   state = {
     candidates: [],
     features: [],
@@ -321,29 +332,19 @@ class App extends Component {
   };
 
   fetchStuff = () => {
+    const cid = this.props.match.params.comparison_id;
     Promise.all([
-      _fetch('/candidates'),
-      _fetch('/features')
+      _fetch(`/comparisons/${cid}/candidates/`),
+      _fetch(`/comparisons/${cid}/features/`)
     ]).then(arr => {
       // console.log(arr);
-      this.setState({candidates: arr[0], features: arr[1]});
+      this.setState({candidates: arr[0].data, features: arr[1].data});
     });
   };
 
   componentDidMount() {
     if (user) this.fetchStuff();
   }
-
-  onAuth = _user => {
-    user = _user;
-    localStorage.setItem('user', JSON.stringify(user));
-    this.fetchStuff();
-  };
-
-  logout = () => {
-    localStorage.removeItem('user');
-    window.location.href = '/';
-  };
 
   hideAbout = () => {
     this.setState({hideAbout: true});
@@ -354,32 +355,33 @@ class App extends Component {
   showFeature = id => this.refs.featureModal.show(id);
   showCandidate = id => this.refs.candidateModal.show(id);
   deleteFeature = id => {
+    const cid = this.props.match.params.comparison_id;
     if (confirm('Delete this feature?')) {
-      _fetch('/features/' + id, {method: "DELETE"}).then(() => this.fetchStuff());
+      _fetch(`/comparisons/${cid}/features/${id}`, {method: "DELETE"}).then(() => this.fetchStuff());
     }
   };
   deleteCandidate = id => {
+    const cid = this.props.match.params.comparison_id;
     if (confirm('Delete this candidate?')) {
-      _fetch('/candidates/' + id, {method: "DELETE"}).then(() => this.fetchStuff());
+      _fetch(`/comparisons/${cid}/candidates/${id}`, {method: "DELETE"}).then(() => this.fetchStuff());
     }
   };
 
   render() {
-    if (!user) return <Auth onAuth={this.onAuth} />;
-    let {candidates, features, hideAbout} = this.state;
-    let isAdmin = user.role === 'admin';
+    const {candidates, features, hideAbout} = this.state;
+    const cid = this.props.match.params.comparison_id;
+    const isAdmin = true;
     return (
-      <div className="container">
-        <Button style={{position: 'absolute', top: 2, right: 2}} bsSize="small" onClick={this.logout}>Logout</Button>
+      <div>
         {!hideAbout && (
           <Jumbotron>
             <p>A tool to help vet candidates. (1) Anyone adds candidates. (2) Managers add "features" (desired candidate attributes, eg "10yrs experience"). (3) Anyone can <strong>score</strong> a candidate 1-5 for each feature. The final score is an average weighted-sum. <a href="https://github.com/lefnire/hiring_regression" target="_blank">Code here</a></p>
             <Button onClick={this.hideAbout}>Close</Button>
           </Jumbotron>
         )}
-        <CandidateModal ref="candidateModal" refresh={this.fetchStuff} />
-        <FeatureModal ref="featureModal" refresh={this.fetchStuff} />
-        <ScoreCandidateModal ref="scoreCandidateModal" refresh={this.fetchStuff} />
+        <CandidateModal ref="candidateModal" refresh={this.fetchStuff} comparison_id={cid} />
+        <FeatureModal ref="featureModal" refresh={this.fetchStuff} comparison_id={cid} />
+        <ScoreCandidateModal ref="scoreCandidateModal" refresh={this.fetchStuff} comparison_id={cid} />
         <Col md={6}>
           <h3>Candidates</h3>
           <Table striped bordered condensed hover>
@@ -391,7 +393,7 @@ class App extends Component {
             <tbody>
               {candidates.map(c => (
                 <tr key={c.id}>
-                  <td>{c.links && c.links[0]? <a href={c.links[0]} target="_blank">{c.name}</a> : c.name}</td>
+                  <td>{c.links && c.links[0]? <a href={c.links[0]} target="_blank">{c.title}</a> : c.title}</td>
                   <td>{~~c.score}</td>
                   <td>
                     <ButtonToolbar>
@@ -433,6 +435,53 @@ class App extends Component {
         </Col>
       </div>
     );
+  }
+}
+
+class App extends Component {
+  constructor() {
+    super();
+    this.state = {
+      comparisons: []
+    }
+  }
+
+  onAuth = _user => {
+    user = _user;
+    localStorage.setItem('user', JSON.stringify(user));
+    this.fetchComparisons();
+  };
+
+  logout = () => {
+    localStorage.removeItem('user');
+    window.location.href = '/';
+  };
+
+  fetchComparisons = () => {
+    _fetch('/comparisons/').then(data => this.setState({comparisons: data.data}));
+  };
+
+  componentDidMount() {
+    if (user) this.fetchComparisons();
+  }
+
+  createComparison = () => _fetch('/comparisons/', {method: 'POST', body: {title: 'Test'}});
+
+  render() {
+    if (!user) return <Auth onAuth={this.onAuth} />;
+
+    return (
+        <Router>
+          <div className="container">
+            <Button style={{position: 'absolute', top: 2, right: 2}} bsSize="small" onClick={this.logout}>Logout</Button>
+            <Button onClick={this.createComparison}>Create Comparison</Button>
+            {this.state.comparisons.map(c => (
+                <Link to={`/comparisons/${c.id}`} key={c.id}>{c.title}</Link>
+            ))}
+            <Route path="/comparisons/:comparison_id" component={Comparison} />
+          </div>
+        </Router>
+    )
   }
 }
 

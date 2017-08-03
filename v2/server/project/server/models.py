@@ -61,7 +61,8 @@ class User(db.Model):
         """
         try:
             payload = {
-                'exp': datetime.datetime.utcnow() + datetime.timedelta(days=0, seconds=5),
+                # 'exp': datetime.datetime.utcnow() + datetime.timedelta(days=0, seconds=5),
+                'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7, seconds=0),
                 'iat': datetime.datetime.utcnow(),
                 'sub': user_id
             }
@@ -216,7 +217,7 @@ class Comparison(db.Model):
         """
         db.engine.execute(text('DELETE FROM comparisons WHERE id=:id'), id=self.id)
 
-    def scoreboard(self):
+    def scoreboard(self, to_dict=False):
         """
         Gets a sorted list of candidates w/i a comparison, ordered by score average across voters
         """
@@ -236,7 +237,17 @@ class Comparison(db.Model):
             GROUP BY c.id
             ORDER BY score DESC
         """
-        return db.engine.execute(text(query), comparison_id=self.id).fetchall()
+        rows = db.engine.execute(text(query), comparison_id=self.id).fetchall()
+        if not to_dict:
+            return rows
+        return [dict(
+            id=r.id,
+            title=r.title,
+            description=r.description,
+            links=r.links,
+            features=r.features,
+            score=r.score
+        ) for r in rows]
 
     @staticmethod
     def input_fn(features, labels=None):
