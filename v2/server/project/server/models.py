@@ -316,6 +316,15 @@ class Comparison(db.Model):
         predictions = self.predict(model)
         return predictions
 
+    def to_json(self):
+        return dict(
+            id=self.id,
+            title=self.title,
+            description=self.description,
+            features=[f.to_json() for f in self.features],
+            candidates=[c.to_json() for c in self.candidates]
+        )
+
 
 class Feature(db.Model):
     """
@@ -330,6 +339,9 @@ class Feature(db.Model):
     # lower_is_better=False
     comparison_id = db.Column(pg.UUID, db.ForeignKey('comparisons.id', **fk_cascade), nullable=False)
 
+    def to_json(self):
+        return dict(id=self.id, title=self.title, description=self.description, weight=self.weight)
+
 
 class Candidate(db.Model):
     """
@@ -342,6 +354,9 @@ class Candidate(db.Model):
     description = db.Column(db.Text)
     links = db.Column(pg.ARRAY(db.String))
     comparison_id = db.Column(pg.UUID, db.ForeignKey('comparisons.id', **fk_cascade), nullable=False)
+
+    def to_json(self):
+        return dict(id=self.id, title=self.title, description=self.description, links=self.links)
 
 
 class Score(db.Model):

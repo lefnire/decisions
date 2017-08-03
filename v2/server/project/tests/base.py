@@ -21,32 +21,34 @@ class BaseTestCase(TestCase):
         db.session.remove()
         db.drop_all()
 
-    def client_get(self, url, token={}):
-        kwargs = {}
-        if token:
-            kwargs['headers'] = dict(
-                Authorization='Bearer ' + token
+    def _build_req_kwargs(self, **kwargs):
+        obj = dict(content_type='application/json')
+        if kwargs.get('token', None):
+            obj['headers'] = dict(
+                Authorization='Bearer ' + kwargs['token']
             )
-        resp = self.client.get(
-            url,
-            content_type='application/json',
-            **kwargs
-        )
+        if kwargs.get('data', None):
+            obj['data'] = json.dumps(kwargs['data'])
+        return obj
+
+    def client_get(self, url, token=None):
+        kwargs = self._build_req_kwargs(token=token)
+        resp = self.client.get(url, **kwargs)
         return json.loads(resp.data.decode()), resp
 
-    def client_post(self, url, data={}, token=None):
-        kwargs = {}
-        if data:
-            kwargs['data'] = json.dumps(data)
-        if token:
-            kwargs['headers'] = dict(
-                Authorization='Bearer ' + token
-            )
-        resp = self.client.post(
-            url,
-            content_type='application/json',
-            **kwargs
-        )
+    def client_post(self, url, data=None, token=None):
+        kwargs = self._build_req_kwargs(data=data, token=token)
+        resp = self.client.post(url, **kwargs)
+        return json.loads(resp.data.decode()), resp
+
+    def client_put(self, url, data=None, token=None):
+        kwargs = self._build_req_kwargs(data=data, token=token)
+        resp = self.client.put(url, **kwargs)
+        return json.loads(resp.data.decode()), resp
+
+    def client_delete(self, url, token=None):
+        kwargs = self._build_req_kwargs(token=token)
+        resp = self.client.delete(url, **kwargs)
         return json.loads(resp.data.decode()), resp
 
     def register_user(self, email, password):
@@ -61,7 +63,7 @@ class BaseTestCase(TestCase):
             data=dict(email=email, password=password)
         )
 
-    def auth(self):
+    def auth_user(self):
         email, password = 'joe@gmail.com', '123456'
         self.register_user(email, password)
         data, _ = self.login_user(email, password)
