@@ -352,7 +352,8 @@ class Comparison extends Component {
     super();
     this.state = {
       candidates: [],
-      features: []
+      features: [],
+      hunches: null
     };
   }
 
@@ -364,6 +365,11 @@ class Comparison extends Component {
     ]).then(arr => {
       // console.log(arr);
       this.setState({candidates: arr[0].data, features: arr[1].data});
+    });
+    setTimeout(() => {
+      _fetch(`/comparisons/${cid}/hunches/`).then(({data}) => {
+        this.setState({hunches: data});
+      })
     });
   };
 
@@ -384,7 +390,6 @@ class Comparison extends Component {
     const allFeaturesScored = _.reduce(features, (acc, feature) => {
       return acc && _.find(original.features, {feature_id: feature.id});
     }, true);
-    debugger;
     if (allFeaturesScored) {return original.score;}
     return (
       <div>
@@ -494,6 +499,8 @@ class Comparison extends Component {
         <FeatureModal ref={c => featureModal = c} refresh={this.fetchStuff} comparison_id={cid} />
         {this.renderCandidates()}
         {this.renderFeatures()}
+        <h3>Hunch Board</h3>
+        {this.state.hunches}
       </div>
     );
   }

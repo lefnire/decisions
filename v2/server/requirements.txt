@@ -19,6 +19,8 @@ psycopg2==2.7.3
 pycparser==2.18
 PyJWT==1.5.2
 python-editor==1.0.3
+scipy==0.19.1
+sklearn==0.0
 six==1.10.0
 SQLAlchemy==1.1.12
 validators==0.12.0

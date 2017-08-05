@@ -7,138 +7,135 @@ from project.server import models as m
 from project.server.auth.views import login_required
 
 
-class BaseView(MethodView):
-    def send(self, data, code=200):
-        if 400 > code >= 200:
-            return make_response(jsonify(dict(status='success', data=data))), code
-        return make_response(jsonify(dict(status='fail', message=data))), code
+# These methods could be in a BaseView(MethodView) and inherited, but hunch() & score() below are floaters
+# which need these.
 
-    def not_impelmented(self):
-        return self.send('Not Implemented', 404)
-
-    def get_comparison(self, id):
-        return db.session.query(m.UserComparison)\
-            .filter_by(user_id=g.user.id, comparison_id=id).first()
+def send(data, code=200):
+    if 400 > code >= 200:
+        return make_response(jsonify(dict(status='success', data=data))), code
+    return make_response(jsonify(dict(status='fail', message=data))), code
 
 
-class ComparisonAPI(BaseView):
+def not_implemented():
+    return send('Not Implemented', code=404)
 
+
+def comparison_404():
+    return send('Comparison not found', code=404)
+
+
+class ComparisonAPI(MethodView):
     def get(self, id):
         """Get this user's comparison(s)"""
         # Comparison list
         if id is None:
-            return self.send([c.comparison.to_json() for c in g.user.comparisons])
+            return send([join.comparison.to_json() for join in g.user.comparisons])
 
-        comp = self.get_comparison(id)
-        if not comp:
-            return self.send('Comparison not found', code=404)
-        return self.send(comp.comparison.to_json())
+        comp = g.user.get_comparison(id)
+        if not comp: return comparison_404()
+        return send(comp.comparison.to_json())
 
     def post(self):
         """Create a new comparision"""
         join = g.user.create_comparison(**request.get_json())
-        return self.send(join.comparison.to_json())
+        return send(join.comparison.to_json())
 
     def delete(self, id):
-        comp = self.get_comparison(id)
-        if not comp:
-            return self.send('Comparison not found', code=404)
+        comp = g.user.get_comparison(id)
+        if not comp: return comparison_404()
         comp.destroy()
-        return self.send(comp)
+        return send(comp)
 
     def put(self, id):
-        comp = self.get_comparison(id)
-        if not comp:
-            return self.send('Comparison not found', code=404)
+        comp = g.user.get_comparison(id)
+        if not comp: return comparison_404()
         comp.update(**request.get_json())
-        return self.send(comp)
+        return send(comp)
 
 
-class FeatureAPI(BaseView):
+class FeatureAPI(MethodView):
     def post(self, cid):
-        if not self.get_comparison(cid):
-            return self.send('Comparison not found', code=404)
+        if not g.user.get_comparison(cid): return comparison_404()
         feature = m.Feature(comparison_id=cid, **request.get_json())
         db.session.add(feature)
         db.session.commit()
-        return self.send(feature.to_json())
+        return send(feature.to_json())
 
     def get(self, cid, id):
-        if not self.get_comparison(cid):
-            return self.send('Comparison not found', code=404)
+        comp = g.user.get_comparison(cid)
+        if not comp: return comparison_404()
 
         if id is None:
-            features = db.session.query(m.Feature).filter_by(comparison_id=cid).all()
-            return self.send([f.to_json() for f in features])
+            features = comp.features.all()
+            return send([f.to_json() for f in features])
 
         feature = db.session.query(m.Feature).filter_by(id=id).first()
         if not feature:
-            return self.send('Feature not found', code=404)
-        return self.send(feature.to_json())
+            return send('Feature not found', code=404)
+        return send(feature.to_json())
 
     def delete(self, cid, id):
-        if not self.get_comparison(cid):
-            return self.send('Comparison not found', code=404)
+        comp = g.user.get_comparison(cid)
+        if not comp: return comparison_404()
+
         feature = db.session.query(m.Feature).filter_by(id=id).first()
         if not feature:
-            return self.send('Feature not found', code=404)
+            return send('Feature not found', code=404)
         db.session.delete(feature)
         db.session.commit()
-        return self.send(feature.to_json())
+        return send(feature.to_json())
 
     def put(self, cid, id):
-        if not self.get_comparison(cid):
-            return self.send('Comparison not found', code=404)
+        comp = g.user.get_comparison(cid)
+        if not comp: return comparison_404()
         feature = db.session.query(m.Feature).filter_by(id=id)
         if not feature.first():
-            return self.send('Feature not found', code=404)
+            return send('Feature not found', code=404)
         feature.update(request.get_json())
         db.session.commit()
-        return self.send(feature.first().to_json())
+        return send(feature.first().to_json())
 
 
-class CandidateAPI(BaseView):
+class CandidateAPI(MethodView):
     def post(self, cid):
-        if not self.get_comparison(cid):
-            return self.send('Comparison not found', code=404)
+        comp = g.user.get_comparison(cid)
+        if comp: return comparison_404()
         candidate = m.Candidate(comparison_id=cid, **request.get_json())
         db.session.add(candidate)
         db.session.commit()
-        return self.send(candidate.to_json())
+        return send(candidate.to_json())
 
     def get(self, cid, id):
-        join = self.get_comparison(cid)
-        if not join:
-            return self.send('Comparison not found', code=404)
+        comp = g.user.get_comparison(cid)
+        if not comp: return comparison_404()
 
         if id is None:
-            candidates = join.comparison.scoreboard(to_dict=True)
-            return self.send(candidates)
+            return send(comp.get_candidates(to_dict=True))
 
         candidate = db.session.query(m.Candidate).filter_by(id=id).first()
         if not candidate:
-            return self.send('Candidate not found', code=404)
-        return self.send(candidate.to_json())
+            return send('Candidate not found', code=404)
+        return send(candidate.to_json())
 
     def delete(self, cid, id):
-        if not self.get_comparison(cid):
-            return self.send('Comparison not found', code=404)
+        comp = g.user.get_comparison(cid)
+        if not comp: return comparison_404()
         candidate = db.session.query(m.Candidate).filter_by(id=id).first()
         if not candidate:
-            return self.send('Candidate not found', code=404)
+            return send('Candidate not found', code=404)
         db.session.delete(candidate)
         db.session.commit()
-        return self.send(candidate.to_json())
+        return send(candidate.to_json())
 
     def put(self, cid, id):
-        if not self.get_comparison(cid):
-            return self.send('Comparison not found', code=404)
+        comp = g.user.get_comparison(cid)
+        if not comp: return comparison_404()
         candidate = db.session.query(m.Candidate).filter_by(id=id)
         if not candidate.first():
-            return self.send('Candidate not found', code=404)
+            return send('Candidate not found', code=404)
         candidate.update(request.get_json())
         db.session.commit()
-        return self.send(candidate.first().to_json())
+        return send(candidate.first().to_json())
 
 
 @app.route('/score/<candidate_id>/<feature_id>/<score>', methods=['POST'])
@@ -153,6 +150,7 @@ def score(candidate_id, feature_id, score):
 def hunch(candidate_id, score):
     g.user.hunch(candidate_id, score)
     return jsonify({})
+
 
 def register_api(view, endpoint, url, pk='id'):
     view_func = login_required(view.as_view(endpoint))

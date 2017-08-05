@@ -11,6 +11,7 @@ import tempfile
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+from sklearn.svm import SVR
 from sqlalchemy.dialects import postgresql as pg
 from sqlalchemy.orm import relationship
 from sqlalchemy import text
@@ -115,6 +116,11 @@ class User(db.Model):
         db.session.commit()
         return user_comparison
 
+    def get_comparison(self, comparison_id):
+        join = db.session.query(UserComparison) \
+            .filter_by(user_id=self.id, comparison_id=comparison_id).first()
+        return join and join.comparison
+
     def _assert_candidate_permission(self, candidate_id):
         # Find the UserComparison, compare permission
         candidate = db.session.query(Candidate).filter_by(id=candidate_id).first()
@@ -122,6 +128,7 @@ class User(db.Model):
             .filter_by(user_id=self.id, comparison_id=candidate.comparison_id).first()
         assert user_comparison and user_comparison.permission.value >= PermissionEnum.score.value, \
             "You don't have permission to score this candidate"
+        return candidate
 
     def score(self, candidate_id, feature_id, score):
         self._assert_candidate_permission(candidate_id)
@@ -138,10 +145,11 @@ class User(db.Model):
         return score_rec
 
     def hunch(self, candidate_id, score):
-        self._assert_candidate_permission(candidate_id)
-        hunch = Hunch(user_id=self.id, candidate_id=candidate_id, score=score)
+        candidate = self._assert_candidate_permission(candidate_id)
+        hunch = Hunch(user_id=self.id, comparison_id=candidate.comparison_id, candidate_id=candidate_id, score=score)
         db.session.add(hunch)
         db.session.commit()
+        candidate.comparison.update_hunches()
         return hunch
 
     def destroy(self):
@@ -192,7 +200,7 @@ class UserComparison(db.Model):
 
     user_id = db.Column(pg.UUID, db.ForeignKey('users.id', **fk_cascade), primary_key=True)
     comparison_id = db.Column(pg.UUID, db.ForeignKey('comparisons.id', **fk_cascade), primary_key=True)
-    comparison = relationship('Comparison')
+    comparison = relationship('Comparison', backref='user_comparison')
 
     permission = db.Column(db.Enum(PermissionEnum), default=PermissionEnum.owner)
     weight = db.Column(db.Float)  # how much this user's vote counts (keep?)
@@ -209,6 +217,7 @@ class Comparison(db.Model):
     description = db.Column(db.Text)
     features = relationship('Feature')
     candidates = relationship('Candidate')
+    hunches = relationship('Hunch', backref='comparison')
 
     def destroy(self):
         """
@@ -218,7 +227,7 @@ class Comparison(db.Model):
         """
         db.engine.execute(text('DELETE FROM comparisons WHERE id=:id'), id=self.id)
 
-    def scoreboard(self, to_dict=False):
+    def get_candidates(self, to_dict=False):
         """
         Gets a sorted list of candidates w/i a comparison, ordered by score average across voters
         """
@@ -264,17 +273,17 @@ class Comparison(db.Model):
     def series_to_df(series):
         return pd.DataFrame([row for row in series])
 
-    def train(self):
+    def _train(self, deep=False):
         """Train our linear regression classifier (TODO make this a stochastic bg job)"""
         query = """
-            SELECT hunches.id, hunches.score, -- hunch_id discarded, needed for unique grouping  
+            SELECT hunches.timestamp, hunches.score, -- timestamp discarded, needed for unique grouping  
               -- Collect features, ensure same feature-order for ML matrix
               ARRAY_AGG(scores.score ORDER BY scores.feature_id) features
             FROM candidates
             INNER JOIN hunches ON hunches.candidate_id=candidates.id
             INNER JOIN scores ON scores.candidate_id=candidates.id
             WHERE comparison_id=%(comparison_id)s
-            GROUP BY hunches.id, hunches.score
+            GROUP BY hunches.timestamp, hunches.score
         """
         df = pd.read_sql(query, db.engine, params={'comparison_id': self.id})
         # Can't pull features straight from sql_df, it's squashed as [list(1,2,3), list(3,4,5)]; ie one-item rows
@@ -282,21 +291,24 @@ class Comparison(db.Model):
 
         # https://github.com/tensorflow/tensorflow/blob/r1.2/tensorflow/examples/learn/wide_n_deep_tutorial.py
         # TODO how to get feature.name in here? Ie tf.contrib.layers.real_valued_column("education_num")
-        # TODO if hunches exceed some #, use ANN instead of LinReg
-        model_dir = tempfile.mkdtemp()
         feature_columns = [tf.contrib.layers.real_valued_column(str(k)) for k in features.keys()]
-        m = tf.contrib.learn.LinearRegressor(
-            model_dir=model_dir,
-            feature_columns=feature_columns
-        )
+        if deep:
+            m = tf.contrib.learn.DNNRegressor(
+                hidden_units=[len(feature_columns)/2],  # TODO experiment
+                feature_columns=feature_columns
+            )
+        else:
+            m = tf.contrib.learn.LinearRegressor(
+                feature_columns=feature_columns
+            )
         m.fit(input_fn=lambda: self.input_fn(features, labels), steps=200)
         return m
 
-    def evaluate(self):
+    def _evaluate(self):
         """TODO"""
         pass
 
-    def predict(self, m):
+    def _predict(self, m):
         # Make candidate prediction from our linear regression model"""
         query = """
             SELECT candidates.id,  
@@ -320,14 +332,38 @@ class Comparison(db.Model):
         results.sort(key=lambda x: x.score, reverse=True)
         return results
 
-    def hunchboard(self):
+    def update_hunches(self):
         """
         Gets a sorted list of candidates w/i a comparison, ordered by score average across voters.
         Hunches learn features.weight, not scores.score
         """
-        model = self.train()
-        predictions = self.predict(model)
-        return predictions
+
+        # TODO here we'll do the ML
+        hunches = self.hunches
+        if len(hunches) < 20:
+            # 1. set each candidate.hunch to its average from hunches
+            query = """
+                UPDATE candidates SET hunch=(
+                  SELECT AVG(score) 
+                  FROM hunches 
+                  WHERE hunches.candidate_id=candidates.id
+                  GROUP BY candidates.id 
+                ) 
+                WHERE candidates.comparison_id=:comparison_id
+            """
+            db.engine.execute(text(query))
+        elif 100 > len(hunches) > 20:
+            if len(hunches) % 3 != 0: return  # every 3rd hunch (save compute)
+            # 2. calculate SVM, SGD, and grid-search average. Set candidate[].hunch
+            model = self.train()
+            self.predict(model)
+        else:
+            # 3. Else if len(hunches)>100, every 3rd do DNN, set candidate[].hunch
+            model = self.train(deep=True)
+            self.predict(model)
+
+        # TODO here just grab the candidate.hunch[] out of database, since it's calculated in user.hunch()
+
 
     def to_json(self):
         return dict(
@@ -367,6 +403,8 @@ class Candidate(db.Model):
     description = db.Column(db.Text)
     links = db.Column(pg.ARRAY(db.String))
     comparison_id = db.Column(pg.UUID, db.ForeignKey('comparisons.id', **fk_cascade), nullable=False)
+    # Running hunch for this candidate. Starts as AVG (first 50) then LinReg (50-100) then DNN (100+)
+    hunch = db.Column(db.Float)
 
     def to_json(self):
         return dict(id=self.id, title=self.title, description=self.description, links=self.links)
@@ -391,8 +429,10 @@ class Hunch(db.Model):
     """
     __tablename__ = 'hunches'
 
-    id = db.Column(pg.UUID, primary_key=True, default=uuid_default)
+    # id = db.Column(pg.UUID, primary_key=True, default=uuid_default)
     user_id = db.Column(pg.UUID, db.ForeignKey('users.id', **fk_cascade), primary_key=True)
     candidate_id = db.Column(pg.UUID, db.ForeignKey('candidates.id', **fk_cascade), primary_key=True)
+    comparison_id = db.Column(pg.UUID, db.ForeignKey('comparisons.id', **fk_cascade), primary_key=True)
+
     score = db.Column(db.Integer, nullable=False)  # TODO min: 0, max: 5
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)

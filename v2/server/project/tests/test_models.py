@@ -43,11 +43,11 @@ class TestModels(BaseTestCase):
         self.user = db.session.query(m.User).filter_by(id=user.id).first()
         self.friend = friend
 
-    def _comparison_and_association(self):
-        return self.user.comparisons[0].comparison, self.user.comparisons[0]
+    def _comparison(self):
+        return self.user.comparisons[0].comparison
 
     def _score_some(self):
-        comparison, _ = self._comparison_and_association()
+        comparison = self._comparison()
         for candidate in comparison.candidates:
             for feature in comparison.features:
                 # For a simple test, just make an object 1, 2, 3 -rank scoreboard (test complex situations elsewhere)
@@ -59,14 +59,14 @@ class TestModels(BaseTestCase):
                 self.user.score(candidate_id=candidate.id, feature_id=feature.id, score=score)
 
     def test_create_records(self):
-        comparison, association = self._comparison_and_association()
-        self.assertTrue(association.permission == m.PermissionEnum.owner)
+        comparison = self._comparison()
+        self.assertTrue(comparison.user_comparison.permission == m.PermissionEnum.owner)
         self.assertTrue(comparison.title == 'New Computer')
         self.assertTrue(comparison.features[0].title == 'Simplicity')
         self.assertTrue(comparison.candidates[0].title == 'Mac')
 
     def test_score(self):
-        comparison, _ = self._comparison_and_association()
+        comparison = self._comparison()
         candidate_id, feature_id = comparison.candidates[0].id, comparison.features[0].id
         score = self.user.score(candidate_id, feature_id, 10)
         assert score.score == 10, 'Test created a score'
@@ -78,9 +78,9 @@ class TestModels(BaseTestCase):
             'Test updated already-created score'
 
     def test_scoreboard_sanity_check(self):
-        comparison, _ = self._comparison_and_association()
+        comparison = self._comparison()
         self._score_some()
-        scoreboard = comparison.scoreboard()
+        scoreboard = comparison.get_candidates()
         assert scoreboard[0].title == 'Mac'
         assert scoreboard[1].title == 'Windows'
         assert scoreboard[2].title == 'Linux'
@@ -95,7 +95,7 @@ class TestModels(BaseTestCase):
         assert db.session.query(m.Score).count() == 0
 
     def test_delete_comparison(self):
-        comparison, _ = self._comparison_and_association()
+        comparison = self._comparison()
         comparison.destroy()
         assert db.session.query(m.User.id).count() == 2, "User shouldn't be deleted"
         assert db.session.query(m.Comparison.id).count() == 0
@@ -105,12 +105,12 @@ class TestModels(BaseTestCase):
         assert db.session.query(m.Score).count() == 0
 
     def test_share_comparison(self):
-        comparison, _ = self._comparison_and_association()
+        comparison = self._comparison()
         self.user.share_comparison(comparison.id, self.friend.id)
         assert db.session.query(m.UserComparison).filter_by(user_id=self.friend.id).first()
 
     def test_multi_score(self):
-        comparison, _ = self._comparison_and_association()
+        comparison = self._comparison()
         self.user.share_comparison(comparison.id, self.friend.id)
         for candidate in comparison.candidates:
             for feature in comparison.features:
@@ -121,7 +121,7 @@ class TestModels(BaseTestCase):
                 }[candidate.title]
                 self.user.score(candidate_id=candidate.id, feature_id=feature.id, score=score)
                 self.friend.score(candidate_id=candidate.id, feature_id=feature.id, score=score-1)
-        scoreboard = comparison.scoreboard()
+        scoreboard = comparison.get_candidates()
         assert scoreboard[0].title == 'Mac'
         error_msg = "It should average between multiple users' scores"
         # 20 = 4 features * 5 score (default). 4.5 = AVG(user's score (5), friend's score (4))
@@ -133,7 +133,7 @@ class TestModels(BaseTestCase):
 
     def test_hunchboard(self):
         return
-        comparison, _ = self._comparison_and_association()
+        comparison = self._comparison()
         self._score_some()
         for i, candidate in enumerate(comparison.candidates):
             self.user.hunch(candidate_id=candidate.id, score=5-i)
