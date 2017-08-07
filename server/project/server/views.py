@@ -33,7 +33,7 @@ class ComparisonAPI(MethodView):
 
         comp = g.user.get_comparison(id)
         if not comp: return comparison_404()
-        return send(comp.comparison.to_json())
+        return send(comp.to_json())
 
     def post(self):
         """Create a new comparision"""
@@ -44,13 +44,17 @@ class ComparisonAPI(MethodView):
         comp = g.user.get_comparison(id)
         if not comp: return comparison_404()
         comp.destroy()
-        return send(comp)
+        return send({})
 
     def put(self, id):
         comp = g.user.get_comparison(id)
         if not comp: return comparison_404()
-        comp.update(**request.get_json())
-        return send(comp)
+
+        # Have to update on query, not model
+        comp = db.session.query(m.Comparison).filter_by(id=id)
+        comp.update(request.get_json())
+        db.session.commit()
+        return send(comp.first().to_json())
 
 
 class FeatureAPI(MethodView):
@@ -66,8 +70,7 @@ class FeatureAPI(MethodView):
         if not comp: return comparison_404()
 
         if id is None:
-            features = comp.features.all()
-            return send([f.to_json() for f in features])
+            return send([f.to_json() for f in comp.features])
 
         feature = db.session.query(m.Feature).filter_by(id=id).first()
         if not feature:
@@ -99,7 +102,7 @@ class FeatureAPI(MethodView):
 class CandidateAPI(MethodView):
     def post(self, cid):
         comp = g.user.get_comparison(cid)
-        if comp: return comparison_404()
+        if not comp: return comparison_404()
         candidate = m.Candidate(comparison_id=cid, **request.get_json())
         db.session.add(candidate)
         db.session.commit()

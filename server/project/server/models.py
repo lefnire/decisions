@@ -11,7 +11,7 @@ import tempfile
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-from sklearn.svm import SVR
+from tensorflow.contrib.learn import LinearRegressor, DNNRegressor
 from sqlalchemy.dialects import postgresql as pg
 from sqlalchemy.orm import relationship
 from sqlalchemy import text
@@ -145,6 +145,21 @@ class User(db.Model):
         return score_rec
 
     def hunch(self, candidate_id, score):
+        """Either add a new hunch, or update the last hunch (if their most recent hunch
+        is less than 1h ago)
+        """
+
+        # If they've already hunched recently, just update that
+        one_hour_ago = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
+        recent_hunch = db.session.query(Hunch)\
+            .filter_by(user_id=self.id, candidate_id=candidate_id)\
+            .filter(Hunch.timestamp > one_hour_ago).first()
+        if recent_hunch:
+            recent_hunch.score = score
+            db.session.commit()
+            return recent_hunch
+
+        # Else add a new hunch
         candidate = self._assert_candidate_permission(candidate_id)
         hunch = Hunch(user_id=self.id, comparison_id=candidate.comparison_id, candidate_id=candidate_id, score=score)
         db.session.add(hunch)
@@ -216,7 +231,7 @@ class Comparison(db.Model):
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
     features = relationship('Feature')
-    candidates = relationship('Candidate')
+    candidates = relationship('Candidate', backref='comparison')
     hunches = relationship('Hunch', backref='comparison')
 
     def destroy(self):
@@ -234,7 +249,13 @@ class Comparison(db.Model):
         query = """
             SELECT c.*,
               ARRAY_AGG('{"feature_id":"' || s.feature_id || '", "weighted_score":' || s.weighted_score || ', "score":' || s.score || '}') as features,
-              SUM(s.score) as score
+              SUM(s.score) as score,
+              (SELECT h.score 
+                FROM hunches h 
+                WHERE h.candidate_id=c.id AND h.timestamp > now() - interval '1 hour' 
+                ORDER BY h.timestamp DESC 
+                LIMIT 1
+              ) last_hunch
             FROM candidates c
             LEFT JOIN (
               SELECT _s.feature_id, 
@@ -257,7 +278,10 @@ class Comparison(db.Model):
             description=r.description,
             links=r.links,
             features=[json.loads(f) for f in r.features if f],
-            score=r.score
+            score=round(r.score or 0, 2),
+            hunch=round(r.hunch or 0, 2),
+            combined=round((r.score + r.hunch)/2, 2) if r.score and r.hunch else 0,
+            last_hunch=r.last_hunch
         ) for r in rows]
 
     @staticmethod
@@ -275,15 +299,16 @@ class Comparison(db.Model):
 
     def _train(self, deep=False):
         """Train our linear regression classifier (TODO make this a stochastic bg job)"""
+        print("Training....")
         query = """
-            SELECT hunches.timestamp, hunches.score, -- timestamp discarded, needed for unique grouping  
+            SELECT h.timestamp, h.score, -- timestamp discarded, needed for unique grouping  
               -- Collect features, ensure same feature-order for ML matrix
-              ARRAY_AGG(scores.score ORDER BY scores.feature_id) features
-            FROM candidates
-            INNER JOIN hunches ON hunches.candidate_id=candidates.id
-            INNER JOIN scores ON scores.candidate_id=candidates.id
-            WHERE comparison_id=%(comparison_id)s
-            GROUP BY hunches.timestamp, hunches.score
+              ARRAY_AGG(s.score ORDER BY s.feature_id) features
+            FROM candidates c
+            INNER JOIN hunches h ON h.candidate_id=c.id
+            INNER JOIN scores s ON s.candidate_id=c.id
+            WHERE c.comparison_id=%(comparison_id)s
+            GROUP BY h.timestamp, h.score
         """
         df = pd.read_sql(query, db.engine, params={'comparison_id': self.id})
         # Can't pull features straight from sql_df, it's squashed as [list(1,2,3), list(3,4,5)]; ie one-item rows
@@ -293,12 +318,12 @@ class Comparison(db.Model):
         # TODO how to get feature.name in here? Ie tf.contrib.layers.real_valued_column("education_num")
         feature_columns = [tf.contrib.layers.real_valued_column(str(k)) for k in features.keys()]
         if deep:
-            m = tf.contrib.learn.DNNRegressor(
+            m = DNNRegressor(
                 hidden_units=[len(feature_columns)/2],  # TODO experiment
                 feature_columns=feature_columns
             )
         else:
-            m = tf.contrib.learn.LinearRegressor(
+            m = LinearRegressor(
                 feature_columns=feature_columns
             )
         m.fit(input_fn=lambda: self.input_fn(features, labels), steps=200)
@@ -310,19 +335,20 @@ class Comparison(db.Model):
 
     def _predict(self, m):
         # Make candidate prediction from our linear regression model"""
+        print("Predicting...")
         query = """
-            SELECT candidates.id,  
-              ARRAY_AGG(scores.score ORDER BY scores.feature_id) features
-            FROM candidates
-            INNER JOIN scores ON scores.candidate_id=candidates.id
-            WHERE comparison_id=%(comparison_id)s
-            GROUP BY candidates.id
+            SELECT c.id,  
+              ARRAY_AGG(s.score ORDER BY s.feature_id) features
+            FROM candidates c
+            INNER JOIN scores s ON s.candidate_id=c.id
+            WHERE c.comparison_id=%(comparison_id)s
+            GROUP BY c.id
         """
         df = pd.read_sql(query, db.engine, params={'comparison_id': self.id})
         ids, features = df['id'], self.series_to_df(df['features'])
 
         predictions = m.predict(input_fn=lambda: self.input_fn(features))
-        df = pd.DataFrame(predictions)
+        df = pd.DataFrame([p for p in predictions])
         df['ids'] = ids
         results = []
         for row in df.values:
@@ -340,7 +366,7 @@ class Comparison(db.Model):
 
         # TODO here we'll do the ML
         hunches = self.hunches
-        if len(hunches) < 20:
+        if True or len(hunches) < 20:
             # 1. set each candidate.hunch to its average from hunches
             query = """
                 UPDATE candidates SET hunch=(
@@ -351,16 +377,17 @@ class Comparison(db.Model):
                 ) 
                 WHERE candidates.comparison_id=:comparison_id
             """
-            db.engine.execute(text(query))
+            db.engine.execute(text(query), comparison_id=self.id)
         elif 100 > len(hunches) > 20:
-            if len(hunches) % 3 != 0: return  # every 3rd hunch (save compute)
             # 2. calculate SVM, SGD, and grid-search average. Set candidate[].hunch
-            model = self.train()
-            self.predict(model)
+            # if len(hunches) % 3 != 0: return  # every 3rd hunch (save compute)
+            model = self._train()
+            self._predict(model)
         else:
             # 3. Else if len(hunches)>100, every 3rd do DNN, set candidate[].hunch
-            model = self.train(deep=True)
-            self.predict(model)
+            # if len(hunches) % 3 != 0: return  # every 3rd hunch (save compute)
+            model = self._train(deep=True)
+            self._predict(model)
 
         # TODO here just grab the candidate.hunch[] out of database, since it's calculated in user.hunch()
 
@@ -435,4 +462,4 @@ class Hunch(db.Model):
     comparison_id = db.Column(pg.UUID, db.ForeignKey('comparisons.id', **fk_cascade), primary_key=True)
 
     score = db.Column(db.Integer, nullable=False)  # TODO min: 0, max: 5
-    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+    timestamp = db.Column(db.DateTime, nullable=False, primary_key=True, default=datetime.datetime.utcnow)

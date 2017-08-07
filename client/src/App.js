@@ -2,24 +2,19 @@
 //FIXME show averages
 
 import React, { Component } from 'react';
-import {
-  BrowserRouter as Router,
-    Route,
-    Link
-} from 'react-router-dom';
+import {BrowserRouter as Router, Route, Link, Switch} from 'react-router-dom';
 import {Table, Col, Button, Modal, FormGroup, ControlLabel, HelpBlock, FormControl, Panel, Alert, ButtonToolbar,
   Jumbotron, Navbar, Tooltip, Glyphicon, OverlayTrigger} from 'react-bootstrap';
 import update from 'react-addons-update';
 import _ from 'lodash';
 import ReactStars from 'react-stars';
 import ReactTable from 'react-table'
+import {LinkContainer} from 'react-router-bootstrap';
 
 // const SERVER = 'https://hiring-regression.herokuapp.com';
 const SERVER = 'http://localhost:5000';
 let user = localStorage.getItem('user');
 user = user && JSON.parse(user);
-
-let candidateModal, featureModal;
 
 class Auth extends Component {
   state = {
@@ -108,38 +103,42 @@ class Auth extends Component {
 class CandidateModal extends Component {
   state = {
     editing: false,
-    show: false,
     form: {}
   };
+  componentDidMount() {
+    this.show(this.props.match.params.id);
+  }
   changeText = (key, e) => this.setState(update(this.state, {form: {[key]: {$set: e.target.value}}}));
   show = id => {
-    const cid = this.props.comparison_id;
-    this.setState({show: true, editing: !!id, form: {links: []}});
+    const {comparison_id} = this.props;
+    this.setState({editing: !!id, form: {links: []}});
     if (!!id) {
-      _fetch(`/comparisons/${cid}/candidates/${id}`).then(data => {
-        const form = data.data;
+      _fetch(`/comparisons/${comparison_id}/candidates/${id}`).then(({data: form}) => {
         form.links = form.links || [];
         this.setState({form})
       });
     }
   };
-  close = () => this.setState({show: false});
+  close = () => {
+    const {comparison_id} = this.props;
+    this.props.history.push(`/comparison/${comparison_id}`);
+  };
   submit = e => {
     e.preventDefault();
     let {form, editing} = this.state;
-    const cid = this.props.comparison_id;
-    let p = editing? _fetch(`/comparisons/${cid}/candidates/${form.id}`, {method: 'PUT', body: form})
-      : _fetch(`/comparisons/${cid}/candidates/`, {method: 'POST', body: form});
+    const {comparison_id} = this.props;
+    let p = editing? _fetch(`/comparisons/${comparison_id}/candidates/${form.id}`, {method: 'PUT', body: form})
+      : _fetch(`/comparisons/${comparison_id}/candidates/`, {method: 'POST', body: form});
     p.then(() => {
       this.close();
-      this.props.refresh();
+      this.props.fetch();
     });
     return false;
   };
   render() {
-    let {form, show, editing} = this.state;
+    let {form, editing} = this.state;
     return (
-      <Modal show={show} onHide={this.close}>
+      <Modal show={true} onHide={this.close}>
         <Modal.Header closeButton>
           <Modal.Title>{editing? form.title : 'Add Candidate'}</Modal.Title>
         </Modal.Header>
@@ -174,12 +173,10 @@ class CandidateModal extends Component {
               </ul>
               <Button bsSize="xsmall" onClick={() => this.setState(update(this.state, {form: {links: {$push: ['']}}}))}>Add Link</Button>
             </Panel>
-            <Button type="submit">Submit</Button>
+            <Button className="pull-right" bsStyle="primary" type="submit">Submit</Button>
+            <div className="clearfix" />
           </form>
         </Modal.Body>
-        <Modal.Footer>
-          <Button onClick={this.close}>Close</Button>
-        </Modal.Footer>
       </Modal>
     );
   }
@@ -188,17 +185,23 @@ class CandidateModal extends Component {
 class FeatureModal extends Component {
   state = {
     editing: false,
-    show: false,
     form: {}
   };
+  componentDidMount() {
+    this.show(this.props.match.params.id);
+  }
   changeText = (key, e) => this.setState(update(this.state, {form: {[key]: {$set: e.target.value}}}));
   changeStar = (val) => this.setState(update(this.state, {form: {weight: {$set: val}}}));
-  close = () => this.setState({show: false});
+  close = () => {
+    const {comparison_id} = this.props;
+    this.props.history.push(`/comparison/${comparison_id}`);
+  };
   show = id => {
-    this.setState({show: true, editing: !!id, form: {}});
-    const cid = this.props.comparison_id;
+    this.setState({editing: !!id, form: {}});
+    const {comparison_id} = this.props;
     if (!!id) {
-      _fetch(`/comparisons/${cid}/features/${id}`).then(data => this.setState({form: data.data}));
+      _fetch(`/comparisons/${comparison_id}/features/${id}`)
+        .then(({data}) => this.setState({form: data}));
     }
   };
   submit = e => {
@@ -209,16 +212,16 @@ class FeatureModal extends Component {
       : _fetch(`/comparisons/${cid}/features/`, {method: 'POST', body: this.state.form});
     p.then(() => {
       this.close();
-      this.props.refresh();
+      this.props.fetch();
     });
     return false;
   };
   render() {
-    let {form, editing, show} = this.state;
+    let {form, editing} = this.state;
     return (
-      <Modal show={show} onHide={this.close}>
+      <Modal show={true} onHide={this.close}>
         <Modal.Header closeButton>
-          <Modal.Title>{form.id? form.title : 'Add Feature'}</Modal.Title>
+          <Modal.Title>{editing? form.title : 'Add Feature'}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <form onSubmit={this.submit}>
@@ -245,23 +248,82 @@ class FeatureModal extends Component {
               value={form.weight}
             />
             <span className="help-block">Number between 1-5 on how important this feature is. 5 for 'required', 1 for 'not that important'.</span>
-            <Button type="submit">Submit</Button>
+            <Button className="pull-right" bsStyle="primary" type="submit">Submit</Button>
+            <div className="clearfix" />
           </form>
         </Modal.Body>
-        <Modal.Footer>
-          <Button onClick={this.close}>Close</Button>
-        </Modal.Footer>
+      </Modal>
+    );
+  }
+}
+
+class ComparisonModal extends Component {
+  state = {
+    editing: false,
+    form: {}
+  };
+
+  componentDidMount() {
+    this.show(this.props.match.params.comparison_id);
+  }
+
+  changeText = (key, e) => this.setState(update(this.state, {form: {[key]: {$set: e.target.value}}}));
+  close = () => this.props.history.push('/comparisons');
+  show = id => {
+    this.setState({editing: !!id, form: {}});
+    if (!!id) {
+      _fetch(`/comparisons/${id}`).then(({data}) => {
+        this.setState({form: _.pick(data, ['id', 'title', 'description'])})
+      });
+    }
+  };
+  submit = e => {
+    e.preventDefault();
+    let {form, editing} = this.state;
+    let p = editing? _fetch(`/comparisons/${form.id}`, {method: "PUT" , body: form})
+      : _fetch(`/comparisons/`, {method: 'POST', body: this.state.form});
+    p.then(this.close).then(this.props.refresh);
+    return false;
+  };
+  render() {
+    let {form, editing} = this.state;
+    return (
+      <Modal show={true} onHide={this.close}>
+        <Modal.Header closeButton>
+          <Modal.Title>{editing? form.title : 'Add Comparison'}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <form onSubmit={this.submit}>
+            <FieldGroup
+              id="comparisonTitle"
+              placeholder="Title"
+              value={form.title}
+              help="Short title, like 'Which job to take?'"
+              onChange={this.changeText.bind(this, 'title')}
+            />
+            <FieldGroup
+              id="featureDescription"
+              placeholder="Description"
+              componentClass="textarea"
+              value={form.description}
+              help="Optional notes about this comparison; eg, more details about the decision you're trying to make."
+              onChange={this.changeText.bind(this, 'description')}
+            />
+            <Button className="pull-right" bsStyle="primary" type="submit">Submit</Button>
+            <div className="clearfix" />
+          </form>
+        </Modal.Body>
       </Modal>
     );
   }
 }
 
 class CandidateSub extends Component {
-  showCandidate = () => candidateModal.show(this.props.candidate.id);
   deleteCandidate = () => {
     const {comparison_id, candidate} = this.props;
     if (confirm('Delete this candidate?')) {
-      _fetch(`/comparisons/${comparison_id}/candidates/${candidate.id}`, {method: "DELETE"}).then(this.props.refresh);
+      _fetch(`/comparisons/${comparison_id}/candidates/${candidate.id}`, {method: "DELETE"})
+        .then(this.props.fetch);
     }
   };
 
@@ -288,7 +350,7 @@ class CandidateSub extends Component {
       Header: 'Score',
       Cell: this.renderScoreCell
     }, {
-      Header: 'Weighted Score',
+      Header: 'Weighted',
       Cell: ({original: feature}) => this.getFeature(feature.id, 'weighted_score')
     }];
 
@@ -305,7 +367,7 @@ class CandidateSub extends Component {
   };
 
   render() {
-    const {features, candidate: c} = this.props;
+    const {comparison_id, features, candidate: c} = this.props;
     return (
       <div className="margins">
         {/*c.links && c.links[0]? <a href={c.links[0]} target="_blank">{c.title}</a> : c.title*/}
@@ -313,8 +375,10 @@ class CandidateSub extends Component {
         {this.renderScoresTable()}
         <div className="clearfix" />
         <ButtonToolbar className="pull-right">
-          <Button bsSize="xsmall" bsStyle="primary" onClick={this.props.refresh}>Done</Button>
-          <Button bsSize="xsmall" onClick={this.showCandidate}>Edit</Button>
+          <Button bsSize="xsmall" bsStyle="primary" onClick={this.props.fetch}>Done</Button>
+          <LinkContainer to={`/comparison/${comparison_id}/candidate/${c.id}`}>
+            <Button bsSize="xsmall">Edit</Button>
+          </LinkContainer>
           <Button bsStyle="danger" bsSize="xsmall" onClick={this.deleteCandidate}>Delete</Button>
         </ButtonToolbar>
       </div>
@@ -323,23 +387,24 @@ class CandidateSub extends Component {
 }
 
 class FeatureSub extends Component {
-  showFeature = () => featureModal.show(this.props.feature.id);
-
   deleteFeature = () => {
     const {feature, comparison_id} = this.props;
     if (confirm('Delete this feature?')) {
-      _fetch(`/comparisons/${comparison_id}/features/${feature.id}`, {method: "DELETE"}).then(this.props.refresh);
+      _fetch(`/comparisons/${comparison_id}/features/${feature.id}`, {method: "DELETE"})
+        .then(this.props.fetch);
     }
   };
 
   render() {
-    const {feature: f} = this.props;
+    const {comparison_id, feature: f} = this.props;
     return (
       <div className="margins">
         {f.description && <small>{f.description}</small>}
         <div className="clearfix" />
         <ButtonToolbar className="pull-right">
-          <Button bsSize="xsmall" onClick={this.showFeature}>Edit</Button>
+          <LinkContainer to={`/comparisons/${comparison_id}/feature/${f.id}`}>
+            <Button bsSize="xsmall">Edit</Button>
+          </LinkContainer>
           <Button bsStyle="danger" bsSize="xsmall" onClick={this.deleteFeature}>Delete</Button>
         </ButtonToolbar>
       </div>
@@ -352,12 +417,11 @@ class Comparison extends Component {
     super();
     this.state = {
       candidates: [],
-      features: [],
-      hunches: null
+      features: []
     };
   }
 
-  fetchStuff = () => {
+  fetch = () => {
     const cid = this.props.match.params.comparison_id;
     Promise.all([
       _fetch(`/comparisons/${cid}/candidates/`),
@@ -366,22 +430,17 @@ class Comparison extends Component {
       // console.log(arr);
       this.setState({candidates: arr[0].data, features: arr[1].data});
     });
-    setTimeout(() => {
-      _fetch(`/comparisons/${cid}/hunches/`).then(({data}) => {
-        this.setState({hunches: data});
-      })
-    });
   };
 
   componentDidMount() {
-    this.fetchStuff();
+    this.fetch();
   }
 
   renderCandidateSub = ({original}) => (
     <CandidateSub
       candidate={original}
       features={this.state.features}
-      refresh={this.fetchStuff}
+      fetch={this.fetch}
       comparison_id={this.props.match.params.comparison_id}
     />
   );
@@ -403,24 +462,34 @@ class Comparison extends Component {
     );
   };
   renderHunchCell = ({original}) => (
-    <ReactStars
-      half={false}
-      onChange={val => _fetch(`/hunch/${original.id}/${val}`, {method: 'POST'}).then(this.fetchStuff)}
-    />
+    <div>
+      <div className="pull-right">{original.hunch}</div>
+      <ReactStars
+        half={false}
+        value={original.last_hunch}
+        onChange={val => _fetch(`/hunch/${original.id}/${val}`, {method: 'POST'})
+          .then(this.fetch)
+        }
+      />
+    </div>
   );
   renderCandidates = () => {
+    const {match} = this.props;
     const {candidates} = this.state;
     const columns = [{
       Header: 'Name',
       accessor: 'title'
     }, {
-      Header: 'Weighted Score',
-      id: 'weighted-score',
+      Header: 'Score',
+      id: 'score',
       Cell: this.renderScoreCell
     }, {
       Header: 'Hunch',
-      id: 'hunch',
+      accessor: 'hunch',
       Cell: this.renderHunchCell
+    }, {
+      Header: 'Combined',
+      accessor: 'combined'
     }];
 
     return (
@@ -433,19 +502,21 @@ class Comparison extends Component {
           showPagination={false}
           SubComponent={this.renderCandidateSub}
         />
-        <Button
-          bsStyle="primary"
+        <LinkContainer
           className="margin-top pull-right"
-          onClick={() => candidateModal.show()}
-        >Add Candidate</Button>
+          to={match.url + `/candidate`}
+        >
+          <Button bsStyle="primary">Add Candidate</Button>
+        </LinkContainer>
       </Col>
     );
   };
 
   onChangeFeatureWeight = (feature, val) => {
-    const cid = this.props.match.params.comparison_id;
+    const {comparison_id} = this.props.match.params;
     feature.weight = val;
-    _fetch(`/comparisons/${cid}/features/${feature.id}`, {method: "PUT", body: feature}).then(this.fetchStuff)
+    _fetch(`/comparisons/${comparison_id}/features/${feature.id}`, {method: "PUT", body: feature})
+      .then(this.fetch)
   };
   renderFeatureWeight = ({original}) => (
     <ReactStars
@@ -457,11 +528,12 @@ class Comparison extends Component {
   renderFeatureSub = ({original}) => (
     <FeatureSub
       feature={original}
-      refresh={this.fetchStuff}
+      fetch={this.fetch}
       comparison_id={this.props.match.params.comparison_id}
     />
   );
   renderFeatures = () => {
+    const {comparison_id} = this.props.match.params;
     const {features} = this.state;
     const columns = [{
       Header: 'Name',
@@ -482,25 +554,37 @@ class Comparison extends Component {
           showPagination={false}
           SubComponent={this.renderFeatureSub}
         />
-        <Button
+        <LinkContainer
           className="margin-top pull-right"
-          onClick={() => featureModal.show()}
-          bsStyle="primary"
-        >Add Feature</Button>
+          to={`/comparison/${comparison_id}/feature`}
+        >
+          <Button bsStyle="primary">Add Feature</Button>
+        </LinkContainer>
       </Col>
     );
   };
 
   render() {
-    const cid = this.props.match.params.comparison_id;
+    const {match} = this.props;
+    const {comparison_id} = match.params;
+    console.log({comparison_id});
     return (
       <div>
-        <CandidateModal ref={c => candidateModal = c} refresh={this.fetchStuff} comparison_id={cid} />
-        <FeatureModal ref={c => featureModal = c} refresh={this.fetchStuff} comparison_id={cid} />
         {this.renderCandidates()}
         {this.renderFeatures()}
-        <h3>Hunch Board</h3>
-        {this.state.hunches}
+        <Route
+          path={match.url + '/feature/:id?'}
+          render={(props) => (
+            <FeatureModal fetch={this.fetch} comparison_id={comparison_id} {...props} />
+          )}
+        />
+        <Route
+          path={match.url + '/candidate/:id?'}
+          render={(props) => (
+            <CandidateModal fetch={this.fetch} comparison_id={comparison_id} {...props} />
+          )}
+        />
+
       </div>
     );
   }
@@ -512,23 +596,33 @@ class Comparisons extends Component {
   };
 
   componentDidMount() {
-    this.fetchComparisons();
+    this.fetch();
   }
 
-  fetchComparisons = () => _fetch('/comparisons/').then(data => this.setState({comparisons: data.data}));
-  createComparison = () => _fetch('/comparisons/', {method: 'POST', body: {title: 'Test'}}).then(this.fetchComparisons);
+  fetch = () => {
+    _fetch('/comparisons/').then(({data}) => this.setState({comparisons: data}));
+  };
+
+  deleteComparison = (id) => {
+    _fetch(`/comparisons/${id}`, {method: 'DELETE'}).then(this.fetch);
+  };
 
   render() {
     const columns = [{
       Header: 'Name',
       accessor: 'title',
-      Cell: ({value, original}) => <Link to={`/comparisons/${original.id}`}>{value}</Link>
+      Cell: ({original: c}) => <Link to={`/comparison/${c.id}`}>{c.title}</Link>
     }, {
       Header: '',
-      Cell: props => (
+      Cell: ({original: c}) => (
         <ButtonToolbar>
-          <Button bsSize="xsmall" onClick={_.noop}>Edit</Button>
-          <Button bsStyle="danger" bsSize="xsmall" onClick={_.noop}>Delete</Button>
+          <LinkContainer to={`/comparisons/edit/${c.id}`}>
+            <Button bsSize="xsmall">Edit</Button>
+          </LinkContainer>
+          <Button
+            bsStyle="danger" bsSize="xsmall"
+            onClick={() => this.deleteComparison(c.id)}
+          >Delete</Button>
         </ButtonToolbar>
       )
     }];
@@ -541,11 +635,20 @@ class Comparisons extends Component {
           minRows={0}
           showPagination={false}
         />
-        <Button
-          className="margin-top pull-right"
-          bsStyle="primary"
-          onClick={this.createComparison}
-        >Add Comparison</Button>
+        <LinkContainer to="/comparisons/create">
+          <Button
+            className="margin-top pull-right"
+            bsStyle="primary"
+          >Add Comparison</Button>
+        </LinkContainer>
+        <Route
+          path="/comparisons/create"
+          render={(props) => <ComparisonModal fetch={this.fetch} {...props} />}
+        />
+        <Route
+          path="/comparisons/edit/:comparison_id"
+          render={(props) => <ComparisonModal fetch={this.fetch} {...props} />}
+        />
       </div>
     )
   }
@@ -555,10 +658,11 @@ class App extends Component {
   onAuth = _user => {
     user = _user;
     localStorage.setItem('user', JSON.stringify(user));
-    window.location.href = '/comparisons/';
+    window.location.href = '/comparisons';
   };
 
-  logout = () => {
+  logout = e => {
+    e.preventDefault();
     localStorage.removeItem('user');
     window.location.href = '/';
   };
@@ -567,13 +671,15 @@ class App extends Component {
     <Navbar>
       <Navbar.Header>
         <Navbar.Brand>
-          <a href="#">Decisioneer</a>
+          <Link to="/comparisons">Decisioneer</Link>
         </Navbar.Brand>
         <Navbar.Toggle />
       </Navbar.Header>
       <Navbar.Collapse>
         <Navbar.Text>
-          <Navbar.Link href="/comparisons/">Comparisons</Navbar.Link>
+          <LinkContainer to="/comparisons">
+            <Navbar.Link>Comparisons</Navbar.Link>
+          </LinkContainer>
         </Navbar.Text>
         <Navbar.Text pullRight>
             <Navbar.Link href="#" onClick={this.logout}>Logout</Navbar.Link>
@@ -583,15 +689,24 @@ class App extends Component {
   );
 
   render() {
-    if (!user) return <Auth onAuth={this.onAuth} />;
+    if (!user) {
+      return <Auth onAuth={this.onAuth} />;
+    }
+
+    if (window.location.pathname === '/') {
+      window.location.href = '/comparisons';
+      return;
+    }
 
     return (
       <Router>
         <div>
           {this.renderNavbar()}
-          <div className="container">
-            <Route path="/comparisons/" exact component={Comparisons} />
-            <Route path="/comparisons/:comparison_id" component={Comparison} />
+          <div className="container-fluid">
+            <Switch>
+              <Route path="/comparisons" component={Comparisons} />
+              <Route path="/comparison/:comparison_id" component={Comparison} />
+            </Switch>
           </div>
         </div>
       </Router>

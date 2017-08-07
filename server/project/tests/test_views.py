@@ -157,7 +157,16 @@ class TestFeatures(BaseViewTestCase):
     def test_get_all(self): self.do_test_get_all()
 
 
-# class TestCandidates(BaseTestCase):
+class TestCandidates(BaseViewTestCase):
+    def setUp(self):
+        super(TestCandidates, self).setUp()
+        self.endpoint = '/comparisons/' + self.inaccessible_comparison.id + '/candidates/'
+        self.inaccessible_id = self.inaccessible_comparison.candidates[0].id
+
+    def test_anonymous(self): self.do_test_anonymous()
+    def test_valid_perms(self): self.do_test_valid_perms()
+    def test_invalid_perms(self): self.do_test_invalid_perms()
+    def test_get_all(self): self.do_test_get_all()
 
 
 if __name__ == '__main__':
