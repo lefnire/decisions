@@ -1,16 +1,18 @@
 # project/server/models.py
 
+import pdb
+from pprint import pprint
 
 import jwt
 import datetime
 import enum
 import uuid
 import json
-import pdb
 import tempfile
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+from sklearn import preprocessing
 from tensorflow.contrib.learn import LinearRegressor, DNNRegressor
 from sqlalchemy.dialects import postgresql as pg
 from sqlalchemy.orm import relationship
@@ -242,47 +244,79 @@ class Comparison(db.Model):
         """
         db.engine.execute(text('DELETE FROM comparisons WHERE id=:id'), id=self.id)
 
-    def get_candidates(self, to_dict=False):
+    def get_candidates(self, user_id=None):
         """
         Gets a sorted list of candidates w/i a comparison, ordered by score average across voters
         """
         query = """
-            SELECT c.*,
-              ARRAY_AGG('{"feature_id":"' || s.feature_id || '", "weighted_score":' || s.weighted_score || ', "score":' || s.score || '}') as features,
-              SUM(s.score) as score,
-              (SELECT h.score 
-                FROM hunches h 
-                WHERE h.candidate_id=c.id AND h.timestamp > now() - interval '1 hour' 
-                ORDER BY h.timestamp DESC 
-                LIMIT 1
-              ) last_hunch
-            FROM candidates c
-            LEFT JOIN (
-              SELECT _s.feature_id, 
-                _s.candidate_id, 
-                _s.score,
-                AVG(_s.score) * (SELECT weight FROM features WHERE _s.feature_id=features.id) weighted_score
-              FROM scores _s
-              GROUP BY _s.feature_id, _s.candidate_id, _s.score
-            ) s ON s.candidate_id=c.id
-            WHERE c.comparison_id=:comparison_id
-            GROUP BY c.id
-            ORDER BY score DESC
+SELECT c.id, c.title, c.description, c.links, c.hunch,
+  s.features, 
+  COALESCE(s.score_total, 0) score_total, 
+  COALESCE(s.score_norm, 0) score_norm,
+  COALESCE(h.hunch_norm::FLOAT, 0) hunch_norm, 
+  COALESCE(h.hunch_total, 0) hunch_total,
+  (SELECT h.score
+    FROM hunches h
+    WHERE h.candidate_id=c.id
+      AND h.user_id=:user_id
+      AND h.timestamp > now() - interval '1 hour'
+    LIMIT 1
+  ) last_hunch
+FROM candidates c
+
+LEFT JOIN (
+  SELECT s.candidate_id,
+    ARRAY_AGG(
+        '{"feature_id":"'||s.feature_id||'", "score_weighted":'||s.score_weighted||', "score":'||s.score||'}'
+    ) features,
+    SUM(s.score_weighted) score_total,
+    0 as score_norm
+
+  FROM (
+    SELECT s.feature_id, s.candidate_id, s.score,
+      AVG(s.score) * (SELECT weight FROM features f WHERE s.feature_id=f.id) score_weighted
+    FROM scores s
+    GROUP BY s.feature_id, s.candidate_id, s.score
+  ) s
+
+  GROUP BY s.candidate_id
+) s ON s.candidate_id=c.id
+
+-- candidate.hunch already exists, should I just add these two columns to candidate instead of calc'ing here?
+LEFT JOIN (
+  SELECT h.candidate_id,
+    AVG(h.score) hunch_norm,
+    SUM(h.score) hunch_total
+  FROM hunches h
+  GROUP BY h.candidate_id
+) h ON h.candidate_id=c.id
+
+WHERE c.comparison_id=:comparison_id
+
+GROUP BY c.id, s.features, s.score_total, s.score_norm, h.hunch_total, h.hunch_norm;
         """
-        rows = db.engine.execute(text(query), comparison_id=self.id).fetchall()
-        if not to_dict:
-            return rows
-        return [dict(
-            id=r.id,
-            title=r.title,
-            description=r.description,
-            links=r.links,
-            features=[json.loads(f) for f in r.features if f],
-            score=round(r.score or 0, 2),
-            hunch=round(r.hunch or 0, 2),
-            combined=round((r.score + r.hunch)/2, 2) if r.score and r.hunch else 0,
-            last_hunch=r.last_hunch
-        ) for r in rows]
+        rows = db.engine.execute(text(query), comparison_id=self.id, user_id=user_id).fetchall()
+        if len(rows) == 0: return []
+        rows = [dict(r) for r in rows]
+
+        # Normalize candidate.score_weighted to candidate.score_norm across all candidates
+        scaler = preprocessing.MinMaxScaler()
+        scaled = scaler.fit_transform([r['score_total'] for r in rows])
+        for i, r in enumerate(rows):
+            score_norm = scaled[i] * 5
+            # Calculate combined first so we don't propagate rounding error
+            r['combined_total'] = round((r['score_total'] + r['hunch_total']) / 2, 1)
+            r['combined_norm'] = round((score_norm + r['hunch_norm']) / 2, 1)
+
+            # Then round the rest
+            r['score_norm'] = round(score_norm, 1)
+            r['score_total'] = round(r['score_total'], 1)
+            r['hunch_total'] = round(r['hunch_total'], 1)
+            r['hunch_norm'] = round(r['hunch_norm'], 1)
+
+            r['features'] = [json.loads(f) for f in r['features']] if r['features'] else []
+
+        return rows
 
     @staticmethod
     def input_fn(features, labels=None):

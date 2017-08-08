@@ -4,7 +4,8 @@
 import React, { Component } from 'react';
 import {BrowserRouter as Router, Route, Link, Switch} from 'react-router-dom';
 import {Table, Col, Button, Modal, FormGroup, ControlLabel, HelpBlock, FormControl, Panel, Alert, ButtonToolbar,
-  Jumbotron, Navbar, Tooltip, Glyphicon, OverlayTrigger} from 'react-bootstrap';
+  Jumbotron, Navbar, Tooltip, Popover, Glyphicon, OverlayTrigger, Checkbox, ToggleButtonGroup,
+  ToggleButton} from 'react-bootstrap';
 import update from 'react-addons-update';
 import _ from 'lodash';
 import ReactStars from 'react-stars';
@@ -351,7 +352,7 @@ class CandidateSub extends Component {
       Cell: this.renderScoreCell
     }, {
       Header: 'Weighted',
-      Cell: ({original: feature}) => this.getFeature(feature.id, 'weighted_score')
+      Cell: ({original: feature}) => this.getFeature(feature.id, 'score_weighted')
     }];
 
     return (
@@ -413,13 +414,11 @@ class FeatureSub extends Component {
 }
 
 class Comparison extends Component {
-  constructor() {
-    super();
-    this.state = {
-      candidates: [],
-      features: []
-    };
-  }
+  state = {
+    candidates: [],
+    features: [],
+    scaled: true
+  };
 
   fetch = () => {
     const cid = this.props.match.params.comparison_id;
@@ -445,11 +444,13 @@ class Comparison extends Component {
     />
   );
   renderScoreCell = ({original}) => {
-    const {features} = this.state;
+    const {features, scaled} = this.state;
     const allFeaturesScored = _.reduce(features, (acc, feature) => {
       return acc && _.find(original.features, {feature_id: feature.id});
     }, true);
-    if (allFeaturesScored) {return original.score;}
+    if (allFeaturesScored) {
+      return original[scaled ? 'score_norm' : 'score_total'];
+    }
     return (
       <div>
         <OverlayTrigger
@@ -461,35 +462,38 @@ class Comparison extends Component {
       </div>
     );
   };
-  renderHunchCell = ({original}) => (
-    <div>
-      <div className="pull-right">{original.hunch}</div>
-      <ReactStars
-        half={false}
-        value={original.last_hunch}
-        onChange={val => _fetch(`/hunch/${original.id}/${val}`, {method: 'POST'})
-          .then(this.fetch)
-        }
-      />
-    </div>
-  );
+  renderHunchCell = ({original: c}) => {
+    const {scaled} = this.state;
+    return (
+      <div style={{display: 'flex', flexDirection: 'row'}}>
+        <ReactStars
+          half={false}
+          value={c.last_hunch}
+          onChange={val => _fetch(`/hunch/${c.id}/${val}`, {method: 'POST'})
+            .then(this.fetch)
+          }
+        />
+        <div style={{paddingLeft: 10}}>{scaled ? c.hunch_norm : c.hunch_total}</div>
+      </div>
+    );
+  };
   renderCandidates = () => {
     const {match} = this.props;
-    const {candidates} = this.state;
+    const {candidates, scaled} = this.state;
     const columns = [{
       Header: 'Name',
       accessor: 'title'
     }, {
       Header: 'Score',
-      id: 'score',
+      accessor: scaled ? 'score_norm' : 'score_total',
       Cell: this.renderScoreCell
     }, {
       Header: 'Hunch',
-      accessor: 'hunch',
+      accessor: scaled ? 'hunch_norm' : 'hunch_total',
       Cell: this.renderHunchCell
     }, {
       Header: 'Combined',
-      accessor: 'combined'
+      accessor: scaled ? 'combined_norm' : 'combined_total'
     }];
 
     return (
@@ -508,6 +512,35 @@ class Comparison extends Component {
         >
           <Button bsStyle="primary">Add Candidate</Button>
         </LinkContainer>
+        <div
+          className="margin-top"
+          style={{display: 'flex', flexDirection: 'row', alignItems: 'center'}}
+        >
+          <ButtonToolbar bsSize="xs">
+            <ToggleButtonGroup
+              style={{paddingRight: 5}}
+              type="radio"
+              name="scaled_totals"
+              onChange={() => this.setState({scaled: !this.state.scaled})}
+              value={scaled ? 1 : 2}
+            >
+              <ToggleButton className="btn-sm" value={1}>Scaled</ToggleButton>
+              <ToggleButton className="btn-sm" value={2}>Totals</ToggleButton>
+            </ToggleButtonGroup>
+          </ButtonToolbar>
+          <OverlayTrigger
+            trigger={['hover','focus']}
+            placement="right"
+            overlay={(
+              <Popover id="should-normalize" title="Scaled or Total?">
+                <strong>Scaled</strong> scores (recommended) are averaged then constrained between 0-5 <i>relative to each other</i>, showing at a glance winners / losers. When unchecked, <strong>totals</strong> are displayed. Totals are raw values summed over time, and may be skewed if you don't hunch all candidates together - use with caution.
+              </Popover>
+            )}
+          >
+            <Glyphicon glyph="question-sign"/>
+          </OverlayTrigger>
+        </div>
+
       </Col>
     );
   };
@@ -604,7 +637,9 @@ class Comparisons extends Component {
   };
 
   deleteComparison = (id) => {
-    _fetch(`/comparisons/${id}`, {method: 'DELETE'}).then(this.fetch);
+    if (confirm('Delete this comparison?')) {
+      _fetch(`/comparisons/${id}`, {method: 'DELETE'}).then(this.fetch);
+    }
   };
 
   render() {
@@ -628,16 +663,18 @@ class Comparisons extends Component {
     }];
 
     return (
-      <div>
+      <div className="container">
         <ReactTable
           data={this.state.comparisons}
           columns={columns}
           minRows={0}
           showPagination={false}
         />
-        <LinkContainer to="/comparisons/create">
+        <LinkContainer
+          to="/comparisons/create"
+          className="margin-top pull-right"
+        >
           <Button
-            className="margin-top pull-right"
             bsStyle="primary"
           >Add Comparison</Button>
         </LinkContainer>

@@ -113,7 +113,7 @@ class CandidateAPI(MethodView):
         if not comp: return comparison_404()
 
         if id is None:
-            return send(comp.get_candidates(to_dict=True))
+            return send(comp.get_candidates(user_id=g.user.id))
 
         candidate = db.session.query(m.Candidate).filter_by(id=id).first()
         if not candidate:
