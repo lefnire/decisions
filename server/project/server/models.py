@@ -105,10 +105,16 @@ class User(db.Model):
         db.session.commit()
         return self.comparisons[-1]
 
-    def share_comparison(self, comparison_id, friend_id, permission=PermissionEnum.add_feature):
+    def share_comparison(self, comparison_id, friend_id=None, friend_email=None, permission=PermissionEnum.add_feature):
         assert permission != PermissionEnum.owner, 'There can only be one owner.'
         assert comparison_id in map(lambda c: c.comparison.id, self.comparisons), \
             "Only the owner of a comparison can share it."
+        assert friend_id or friend_email, "Either email or id should be provided."
+        if friend_email:
+            friend_id = db.session.query(User).filter_by(email=friend_email).first().id
+        exists = db.session.query(UserComparison)\
+            .filter_by(user_id=friend_id, comparison_id=comparison_id).first()
+        if exists: return exists
         user_comparison = UserComparison(
             user_id=friend_id,
             comparison_id=comparison_id,
@@ -398,7 +404,6 @@ GROUP BY c.id, s.features, s.score_total, s.score_norm, h.hunch_total, h.hunch_n
         Hunches learn features.weight, not scores.score
         """
 
-        # TODO here we'll do the ML
         hunches = self.hunches
         if True or len(hunches) < 20:
             # 1. set each candidate.hunch to its average from hunches

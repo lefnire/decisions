@@ -50,11 +50,21 @@ class ComparisonAPI(MethodView):
         comp = g.user.get_comparison(id)
         if not comp: return comparison_404()
 
+        # Stash this away so no key argument error
+        body = request.get_json()
+        share = body.pop('share')
+
         # Have to update on query, not model
-        comp = db.session.query(m.Comparison).filter_by(id=id)
-        comp.update(request.get_json())
+        comp_q = db.session.query(m.Comparison).filter_by(id=id)
+        comp_q.update(request.get_json())
         db.session.commit()
-        return send(comp.first().to_json())
+
+        # Send shares
+        if share:
+            for email in share.split():
+                g.user.share_comparison(comparison_id=comp.id, friend_email=email)
+
+        return send(comp_q.first().to_json())
 
 
 class FeatureAPI(MethodView):

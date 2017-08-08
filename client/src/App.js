@@ -17,6 +17,13 @@ const SERVER = 'http://localhost:5000';
 let user = localStorage.getItem('user');
 user = user && JSON.parse(user);
 
+const TABLE_DEFAULTS = {
+  minRows: 0,
+  defaultPageSize: 100,
+  showPagination: false,
+  defaultSortDesc: true
+};
+
 class Auth extends Component {
   state = {
     showRegister: false,
@@ -261,7 +268,7 @@ class FeatureModal extends Component {
 class ComparisonModal extends Component {
   state = {
     editing: false,
-    form: {}
+    form: {title: '', description: ''}
   };
 
   componentDidMount() {
@@ -283,7 +290,7 @@ class ComparisonModal extends Component {
     let {form, editing} = this.state;
     let p = editing? _fetch(`/comparisons/${form.id}`, {method: "PUT" , body: form})
       : _fetch(`/comparisons/`, {method: 'POST', body: this.state.form});
-    p.then(this.close).then(this.props.refresh);
+    p.then(this.close).then(this.props.fetch);
     return false;
   };
   render() {
@@ -303,13 +310,24 @@ class ComparisonModal extends Component {
               onChange={this.changeText.bind(this, 'title')}
             />
             <FieldGroup
-              id="featureDescription"
+              id="comparisonTitle"
               placeholder="Description"
               componentClass="textarea"
               value={form.description}
               help="Optional notes about this comparison; eg, more details about the decision you're trying to make."
               onChange={this.changeText.bind(this, 'description')}
             />
+            {editing && (
+              <FieldGroup
+                id="comparisonShare"
+                placeholder="Shared emails"
+                componentClass="textarea"
+                value={form.share}
+                help="Optionally share this comparison with others (one email per line). They'll be able to participate in scoring / hunching, and your values will be averaged."
+                onChange={this.changeText.bind(this, 'share')}
+              />
+            )}
+
             <Button className="pull-right" bsStyle="primary" type="submit">Submit</Button>
             <div className="clearfix" />
           </form>
@@ -360,9 +378,8 @@ class CandidateSub extends Component {
         className="margins"
         data={features}
         columns={columns}
-        minRows={0}
-        showPagination={false}
         SubComponent={this.renderCandidateSub}
+        {...TABLE_DEFAULTS}
       />
     );
   };
@@ -426,14 +443,23 @@ class Comparison extends Component {
       _fetch(`/comparisons/${cid}/candidates/`),
       _fetch(`/comparisons/${cid}/features/`)
     ]).then(arr => {
-      // console.log(arr);
-      this.setState({candidates: arr[0].data, features: arr[1].data});
+      const [candidates, features] = [arr[0].data, arr[1].data];
+      // total > scaled when <2 candidates. But if they've manually changed scaled, don't
+      // mess with their setting
+      const scaled = this.scaledTouched ? this.state.scaled
+        : candidates.length < 3 ? false : true;
+      this.setState({scaled, candidates, features});
     });
   };
 
   componentDidMount() {
     this.fetch();
   }
+
+  changeScaled = () => {
+    this.scaledTouched = true;
+    this.setState({scaled: !this.state.scaled});
+  };
 
   renderCandidateSub = ({original}) => (
     <CandidateSub
@@ -502,9 +528,8 @@ class Comparison extends Component {
         <ReactTable
           data={candidates}
           columns={columns}
-          minRows={0}
-          showPagination={false}
           SubComponent={this.renderCandidateSub}
+          {...TABLE_DEFAULTS}
         />
         <LinkContainer
           className="margin-top pull-right"
@@ -521,7 +546,7 @@ class Comparison extends Component {
               style={{paddingRight: 5}}
               type="radio"
               name="scaled_totals"
-              onChange={() => this.setState({scaled: !this.state.scaled})}
+              onChange={this.changeScaled}
               value={scaled ? 1 : 2}
             >
               <ToggleButton className="btn-sm" value={1}>Scaled</ToggleButton>
@@ -583,9 +608,8 @@ class Comparison extends Component {
         <ReactTable
           data={features}
           columns={columns}
-          minRows={0}
-          showPagination={false}
           SubComponent={this.renderFeatureSub}
+          {...TABLE_DEFAULTS}
         />
         <LinkContainer
           className="margin-top pull-right"
@@ -667,8 +691,7 @@ class Comparisons extends Component {
         <ReactTable
           data={this.state.comparisons}
           columns={columns}
-          minRows={0}
-          showPagination={false}
+          {...TABLE_DEFAULTS}
         />
         <LinkContainer
           to="/comparisons/create"
