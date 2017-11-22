@@ -17,6 +17,7 @@ from tensorflow.contrib.learn import LinearRegressor, DNNRegressor
 from sqlalchemy.dialects import postgresql as pg
 from sqlalchemy.orm import relationship
 from sqlalchemy import text
+from sqlalchemy.sql import func
 
 from project.server import app, db, bcrypt
 
@@ -265,7 +266,7 @@ SELECT c.id, c.title, c.description, c.links, c.hunch,
     FROM hunches h
     WHERE h.candidate_id=c.id
       AND h.user_id=:user_id
-      AND h.timestamp > now() - interval '1 hour'
+      AND h.timestamp > now() at time zone 'utc' - interval '1 hours' --either that or save Hunch.timestamp as non-utc 
     LIMIT 1
   ) last_hunch
 FROM candidates c

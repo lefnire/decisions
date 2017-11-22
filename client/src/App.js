@@ -12,8 +12,8 @@ import ReactStars from 'react-stars';
 import ReactTable from 'react-table'
 import {LinkContainer} from 'react-router-bootstrap';
 
-// const SERVER = 'https://hiring-regression.herokuapp.com';
-const SERVER = 'http://localhost:5000';
+const SERVER = 'http://10.1.10.230:5000';
+// const SERVER = 'http://localhost:5000';
 let user = localStorage.getItem('user');
 user = user && JSON.parse(user);
 
